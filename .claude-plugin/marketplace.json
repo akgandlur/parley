@@ -1,0 +1,23 @@
+{
+  "name": "parley",
+  "description": "parley: working sessions between two people's Claude Code agents",
+  "owner": {
+    "name": "akgandlur"
+  },
+  "plugins": [
+    {
+      "name": "parley",
+      "source": "./",
+      "description": "A working session between your Claude and another person's: one calls with an agenda, a person accepts, and both sides keep the same minutes",
+      "author": {
+        "name": "akgandlur"
+      },
+      "keywords": [
+        "agents",
+        "collaboration",
+        "mcp"
+      ],
+      "repository": "https://github.com/akgandlur/parley"
+    }
+  ]
+}

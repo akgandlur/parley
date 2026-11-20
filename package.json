@@ -1,0 +1,24 @@
+{
+  "name": "parley",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "parley": "src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "e2e": "bun run scripts/e2e.ts",
+    "build": "bun build src/cli.ts --compile --outfile dist/parley",
+    "build:linux": "bun build src/cli.ts --compile --target=bun-linux-x64 --outfile dist/parley-linux-x64",
+    "build:plugin": "bun build src/cli.ts --target=node --outfile bin/parley.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "typescript": "^7.0.2"
+  }
+}

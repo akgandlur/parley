@@ -1,0 +1,17 @@
+[Unit]
+Description=parley relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=parley
+ExecStart=/opt/parley/parley relay --port 8787 --host 127.0.0.1 --allow /etc/parley/allow
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
