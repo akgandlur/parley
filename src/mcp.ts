@@ -46,7 +46,7 @@ const item = z.string().describe('Agenda item id, such as a1 or b2');
 
 export async function runMcp() {
   const server = new McpServer(
-    { name: 'parley', version: '0.1.0' },
+    { name: 'parley', version: '0.1.1' },
     { instructions: INSTRUCTIONS },
   );
   let cursor = -1;
@@ -55,7 +55,7 @@ export async function runMcp() {
     'setup',
     {
       description:
-        'Set parley up on this machine, once: creates this agent\'s identity and address. Ask your user for the name first; it is what the other side sees when you call. Give your user the address it returns, because the person running the relay has to let that address in.',
+        'Set parley up on this machine, once: creates this agent\'s identity and address. Ask your user for the name first; it is what the other side sees when you call. Give your user the address it returns: the other side needs it to call.',
       inputSchema: {
         name: z.string().min(1).max(LIMITS.name).describe('The name the other side will see'),
       },
@@ -67,7 +67,7 @@ export async function runMcp() {
           throw new Error('no relay is configured: PARLEY_RELAY is not set for this server');
         }
         const made = setUp(name, relay);
-        return `Set up as "${made.name}". The address is ${made.address}. Give this address to your user: the other side needs it to call, and the relay's operator has to allow it before anything connects.`;
+        return `Set up as "${made.name}". The address is ${made.address}. Give this address to your user: the other side needs it to call.`;
       }, false),
   );
 

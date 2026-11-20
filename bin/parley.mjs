@@ -6976,7 +6976,7 @@ var require_dist = __commonJS(function(exports, module) {
 });
 
 // src/cli.ts
-import { readFileSync as readFileSync4 } from "fs";
+import { readFileSync as readFileSync3 } from "fs";
 import { createInterface } from "readline/promises";
 
 // src/crypto.ts
@@ -22223,10 +22223,10 @@ async function answer(fn, needsSetup = true) {
 }
 var item2 = string2().describe("Agenda item id, such as a1 or b2");
 async function runMcp() {
-  const server = new McpServer({ name: "parley", version: "0.1.0" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "parley", version: "0.1.1" }, { instructions: INSTRUCTIONS });
   let cursor = -1;
   server.registerTool("setup", {
-    description: "Set parley up on this machine, once: creates this agent's identity and address. Ask your user for the name first; it is what the other side sees when you call. Give your user the address it returns, because the person running the relay has to let that address in.",
+    description: "Set parley up on this machine, once: creates this agent's identity and address. Ask your user for the name first; it is what the other side sees when you call. Give your user the address it returns: the other side needs it to call.",
     inputSchema: {
       name: string2().min(1).max(LIMITS.name).describe("The name the other side will see")
     }
@@ -22236,7 +22236,7 @@ async function runMcp() {
       throw new Error("no relay is configured: PARLEY_RELAY is not set for this server");
     }
     const made = setUp(name, relay);
-    return `Set up as "${made.name}". The address is ${made.address}. Give this address to your user: the other side needs it to call, and the relay's operator has to allow it before anything connects.`;
+    return `Set up as "${made.name}". The address is ${made.address}. Give this address to your user: the other side needs it to call.`;
   }, false));
   server.registerTool("status", {
     description: "Show your parley name and address, whether the relay is connected, and the current session with its agenda."
@@ -23047,44 +23047,21 @@ async function runNode() {
 
 // src/relay.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { readFileSync as readFileSync3 } from "node:fs";
 var RELAY_AUTH2 = "parley relay auth ";
-var NOT_ALLOWED = 4003;
 var HELLO_MS = 1e4;
 var MAX_CONNECTIONS = 500;
 var WINDOW_MS = 1e4;
 var MAX_PER_WINDOW = 300;
 var log2 = (...parts) => console.log(new Date().toISOString(), ...parts);
-function readAllowed(file) {
-  return new Set(readFileSync3(file, "utf8").split(`
-`).map((line) => line.replace(/#.*/, "").trim()).filter(Boolean).map(normalizeAddress));
-}
-function startRelay(port, hostname, allowFile) {
+function startRelay(port, hostname) {
   const online = new Map;
   let connections = 0;
-  if (allowFile)
-    log2(`allowing ${readAllowed(allowFile).size} addresses from ${allowFile}`);
-  function isAllowed(address) {
-    if (!allowFile)
-      return true;
-    try {
-      return readAllowed(allowFile).has(address);
-    } catch (err) {
-      log2("cannot read the allow list:", err instanceof Error ? err.message : err);
-      return false;
-    }
-  }
   function hello(ws, msg) {
     if (msg.t !== "hello" || typeof msg.publicKey !== "string" || typeof msg.sig !== "string" || !verifyText(msg.publicKey, RELAY_AUTH2 + ws.data.nonce, msg.sig)) {
       ws.close(4001, "bad hello");
       return;
     }
     const address = addressOf2(msg.publicKey);
-    if (!isAllowed(address)) {
-      log2("refused", address);
-      ws.close(NOT_ALLOWED, "this address is not on the allow list yet; send it to whoever runs the relay");
-      return;
-    }
     clearTimeout(ws.data.helloTimer);
     online.get(address)?.close(4002, "replaced by a newer connection");
     online.set(address, ws);
@@ -23248,7 +23225,7 @@ var USAGE = `parley: a working session between two AI agents
   parley stop               stop the background node
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
-  parley relay [--port 8787] [--host 0.0.0.0] [--allow <file of addresses>]
+  parley relay [--port 8787] [--host 0.0.0.0]
   parley daemon             run the node in the foreground`;
 var [command, ...rest] = process.argv.slice(2);
 function flag(name) {
@@ -23315,7 +23292,7 @@ ${addressOf(identity.publicKey)}`);
       const v = await request("status");
       if (!v.session?.minutes)
         throw new Error("the last session left no minutes");
-      return console.log(readFileSync4(v.session.minutes, "utf8"));
+      return console.log(readFileSync3(v.session.minutes, "utf8"));
     }
     case "stop":
       return console.log(await request("stop", {}, { start: false }));
@@ -23327,7 +23304,7 @@ ${addressOf(identity.publicKey)}`);
       if (typeof Bun === "undefined") {
         throw new Error("the relay runs on Bun: use the parley binary, or `bun src/cli.ts relay`");
       }
-      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0", flag("--allow"));
+      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0");
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

@@ -323,10 +323,7 @@ Skip any step that is already done.
 4. Ask me what name the other side should see. Then call the parley setup tool with that name.
 5. Show me my parley address, and tell me to send it to the person I want to work with.</pre>
         </div>
-        <p class="needs">
-          Needs Claude Code and Node 22 or newer. The relay is invite-only for
-          now: <a href="#access">how to get in</a>.
-        </p>
+        <p class="needs">Needs Claude Code and Node 22 or newer.</p>
 
         <section>
           <h2>How a session goes</h2>
@@ -454,17 +451,13 @@ Skip any step that is already done.
           </div>
         </section>
 
-        <section id="access">
-          <h2>Getting onto the relay</h2>
+        <section>
+          <h2>The relay</h2>
           <p>
-            Both agents connect out to a relay, so neither side opens a port.
-            The hosted relay only lets in addresses on its list while this is
-            early. After setup, your Claude shows you your address:
-            <a href="https://github.com/akgandlur/parley/issues/new?title=Relay%20access">open an issue</a>
-            with it to ask for access.
-          </p>
-          <p>
-            Or run your own relay. It is one command, and the
+            Both agents connect out to a relay, so neither side opens a port
+            or needs access to the other's machines. The hosted relay is open
+            to anyone and needs no account. You can also run your own: it is
+            one command, and the
             <a href="https://github.com/akgandlur/parley#set-up-for-real">README</a>
             has the server files.
           </p>

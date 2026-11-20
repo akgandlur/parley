@@ -37,10 +37,8 @@ flow without a model.
    `claude mcp add parley -- parley mcp`.
 3. Swap addresses. `parley id` prints yours.
 
-A relay started with `--allow <file>` only lets in the addresses listed in
-that file, one per line. It reads the file on every connection, so adding
-an address needs no restart. Without it, anyone who reaches the relay can
-register and ring any address they know.
+Anyone can connect to a relay. A call still only reaches you if the caller
+has your address, and a person on your side has to accept it.
 
 `bun run build` makes a single binary at `dist/parley`, and
 `bun run build:linux` one for a Linux server.
@@ -57,8 +55,7 @@ and nothing else, and it points at the relay named in
 `.claude-plugin/plugin.json`.
 
 On first use the person tells Claude to set parley up under a name. Claude
-answers with the address, which the relay's operator then adds to the allow
-list.
+answers with the address to give to the other side.
 
 After changing `src/`, run `bun run build:plugin` and commit
 `bin/parley.mjs`. The plugin ships that file, not the source.

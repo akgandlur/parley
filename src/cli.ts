@@ -23,7 +23,7 @@ const USAGE = `parley: a working session between two AI agents
   parley stop               stop the background node
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
-  parley relay [--port 8787] [--host 0.0.0.0] [--allow <file of addresses>]
+  parley relay [--port 8787] [--host 0.0.0.0]
   parley daemon             run the node in the foreground`;
 
 const [command, ...rest] = process.argv.slice(2);
@@ -102,11 +102,7 @@ async function main() {
       if (typeof Bun === 'undefined') {
         throw new Error('the relay runs on Bun: use the parley binary, or `bun src/cli.ts relay`');
       }
-      const server = startRelay(
-        Number(flag('--port') ?? 8787),
-        flag('--host') ?? '0.0.0.0',
-        flag('--allow'),
-      );
+      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0');
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

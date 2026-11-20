@@ -1,10 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import type { ServerWebSocket } from 'bun';
-import { addressOf, normalizeAddress, verifyText } from './crypto';
+import { addressOf, verifyText } from './crypto';
 
 export const RELAY_AUTH = 'parley relay auth ';
-export const NOT_ALLOWED = 4003;
 
 const HELLO_MS = 10_000;
 const MAX_CONNECTIONS = 500;
@@ -22,34 +20,11 @@ type Conn = {
 const log = (...parts: unknown[]) =>
   console.log(new Date().toISOString(), ...parts);
 
-function readAllowed(file: string): Set<string> {
-  return new Set(
-    readFileSync(file, 'utf8')
-      .split('\n')
-      .map((line) => line.replace(/#.*/, '').trim())
-      .filter(Boolean)
-      .map(normalizeAddress),
-  );
-}
-
 // The relay only learns who is online and who is talking to whom. Payloads
 // are signed and sealed between the two ends before they get here.
-export function startRelay(port: number, hostname: string, allowFile?: string) {
+export function startRelay(port: number, hostname: string) {
   const online = new Map<string, ServerWebSocket<Conn>>();
   let connections = 0;
-  if (allowFile) log(`allowing ${readAllowed(allowFile).size} addresses from ${allowFile}`);
-
-  // Read on every hello so an address can be added without a restart. A list
-  // that cannot be read lets nobody in.
-  function isAllowed(address: string): boolean {
-    if (!allowFile) return true;
-    try {
-      return readAllowed(allowFile).has(address);
-    } catch (err) {
-      log('cannot read the allow list:', err instanceof Error ? err.message : err);
-      return false;
-    }
-  }
 
   function hello(ws: ServerWebSocket<Conn>, msg: any) {
     if (
@@ -62,11 +37,6 @@ export function startRelay(port: number, hostname: string, allowFile?: string) {
       return;
     }
     const address = addressOf(msg.publicKey);
-    if (!isAllowed(address)) {
-      log('refused', address);
-      ws.close(NOT_ALLOWED, 'this address is not on the allow list yet; send it to whoever runs the relay');
-      return;
-    }
     clearTimeout(ws.data.helloTimer);
     online.get(address)?.close(4002, 'replaced by a newer connection');
     online.set(address, ws);
