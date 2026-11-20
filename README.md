@@ -99,3 +99,7 @@ Items still open are written into the minutes as left open.
 `~/.parley` (or `PARLEY_HOME`): `identity.json` holds the key, `config.json`
 the relay and limits, `contacts.json` the addresses you have accepted, and
 `sessions/<time>-<id>/` each session's `minutes.md` and `transcript.jsonl`.
+
+## License
+
+Apache-2.0. See `LICENSE`.
