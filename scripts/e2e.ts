@@ -7,10 +7,21 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ServerWebSocket } from 'bun';
-import { verifyText, type Identity } from '../src/crypto';
+import { randomBytes } from 'node:crypto';
+import {
+  addressOf,
+  deriveSessionKeys,
+  newEphemeral,
+  newIdentity,
+  open as unseal,
+  seal,
+  signText,
+  verifyText,
+  type Identity,
+} from '../src/crypto';
 import { readJson, writeJson, type Config, type Contact } from '../src/home';
 import { request, type NodeInfo } from '../src/ipc';
-import { startRelay } from '../src/relay';
+import { RELAY_AUTH, startRelay } from '../src/relay';
 import { VERSION, type Ev, type View, type WaitResult } from '../src/types';
 
 // PARLEY_E2E_CLI="node /abs/bin/parley.mjs" runs the same checks against
@@ -137,6 +148,7 @@ function transcript(p: Peer, sessionId: string) {
     [parties.callee.address]: parties.callee.publicKey,
   };
   const entries = lines.map((l) => ({ ...l, entry: JSON.parse(l.raw) }));
+  for (const r of entries.find((l) => l.entry.type === 'call')?.entry.roster ?? []) keys[r.address] = r.key;
   const signed = entries.every((l) => {
     const key = keys[l.entry.from];
     return key !== undefined && l.sig !== undefined && verifyText(key, l.raw, l.sig);
@@ -812,6 +824,384 @@ async function badNetwork() {
   proxy.stop();
 }
 
+async function threeSides() {
+  console.log('\n# a session of three');
+  for (const p of [alice, bob, carol]) p.cursor = (await p.rpc('status')).cursor;
+  const [bobAddress, carolAddress] = [await bob.address(), await carol.address()];
+  await alice.rpc('call', { address: [bobAddress, carolAddress], title: 'Three ways', items: ['Launch date', 'Owner'] });
+  await bob.until('incoming');
+  await carol.until('incoming');
+  const ringing = [await bob.session(), await carol.session()];
+  check(
+    'both called sides are rung, and each is told who else is in the call',
+    ringing.every((s) => s.state === 'awaiting_approval' && s.sides?.map((x) => x.address).join() === [alice, bob, carol].map((p) => p.home.split('/').at(-1)).join()),
+    ringing.map((s) => s.sides),
+  );
+  await bob.rpc('approve', { accept: true });
+  await Bun.sleep(300);
+  check('one acceptance does not open it', (await alice.session()).state === 'awaiting_approval' && (await bob.session()).state === 'awaiting_approval');
+  await carol.rpc('approve', { accept: true });
+  for (const p of [alice, bob, carol]) await p.until('opened');
+  check('it opens once both called sides accept', (await Promise.all([alice, bob, carol].map((p) => p.session()))).every((s) => s.state === 'active'));
+
+  const heard = async (p: Peer, text: string) => {
+    const seen = await p.until('say');
+    return seen.find((e) => e.kind === 'say' && e.text === text);
+  };
+  const says: [Peer, string, Peer[]][] = [
+    [bob, 'Bob', [alice, carol]],
+    [carol, 'Carol', [alice, bob]],
+    [alice, 'Alice', [bob, carol]],
+  ];
+  for (const [from, name, to] of says) {
+    await from.rpc('say', { item: 'a1', text: `${name} here` });
+    const got = await Promise.all(to.map((p) => heard(p, `${name} here`)));
+    check(
+      `a say from ${name} reaches the other two under ${name}'s name`,
+      got.every((e) => e?.kind === 'say' && e.by?.startsWith(name)),
+      got,
+    );
+  }
+
+  await bob.rpc('propose', { item: 'a1', text: 'The first of March' });
+  const offer = (await alice.until('propose')).find((e) => e.kind === 'propose');
+  await carol.until('propose');
+  const ref = offer?.kind === 'propose' ? offer.ref : '';
+  check('a proposal is named by its author’s letter', ref.startsWith('b:'), offer);
+  await alice.rpc('agree', { item: 'a1', proposal: ref });
+  await carol.until('agree');
+  await bob.until('agree');
+  const half = await Promise.all([alice, bob, carol].map((p) => p.item('a1')));
+  check('one agreement out of two leaves the item open', half.every((i) => i.state === 'open'), half);
+  check('the view says who has agreed', (await carol.item('a1')).others?.[0]?.agreedBy.join() === 'a', await carol.item('a1'));
+  await carol.rpc('agree', { item: 'a1', proposal: ref });
+  await bob.until('agree');
+  const closed = await Promise.all([alice, bob, carol].map((p) => p.item('a1')));
+  check(
+    'the second agreement closes it the same way on all three',
+    closed.every((i) => i.state === 'agreed' && i.agreed?.text === 'The first of March'),
+    closed,
+  );
+
+  await carol.rpc('hangup', { reason: 'another meeting' });
+  const leftA = (await alice.until('left')).find((e) => e.kind === 'left');
+  await bob.until('left');
+  check(
+    'a called side that hangs up leaves, and the other two carry on',
+    (await carol.session()).state === 'ended' && (await alice.session()).state === 'active' && (await bob.session()).state === 'active' && leftA?.kind === 'left' && leftA.who.startsWith('Carol'),
+    [leftA, (await carol.session()).endedReason],
+  );
+  await alice.rpc('say', { item: 'a2', text: 'Still here' });
+  check('the two left still hear each other', Boolean(await heard(bob, 'Still here')));
+
+  await alice.rpc('hangup', { reason: 'out of time' });
+  const endB = (await bob.until('ended')).find((e) => e.kind === 'ended');
+  const endA = (await alice.until('ended')).find((e) => e.kind === 'ended');
+  check(
+    'the caller hanging up ends it for everyone',
+    endB?.kind === 'ended' && endB.reason === 'Alice (a) hung up: out of time' && endA?.kind === 'ended' && endA.reason === 'you hung up: out of time',
+    [endA, endB],
+  );
+
+  const sessions = await Promise.all([alice, bob, carol].map((p) => p.session()));
+  const minutes = sessions.map((s) => (s.minutes && existsSync(s.minutes) ? readFileSync(s.minutes, 'utf8') : ''));
+  check(
+    'minutes on all three name all three sides',
+    minutes.every((m) => ['Alice', 'Bob', 'Carol'].every((n) => m.split('\n').find((l) => l.startsWith('- Between:'))?.includes(n))),
+    minutes,
+  );
+  check(
+    'the minutes record who left early',
+    minutes.slice(0, 2).every((m) => m.includes('- Left early: Carol: another meeting')) && minutes[2]?.includes('- How it ended: you hung up: another meeting'),
+    minutes,
+  );
+  check('the minutes agree on what was agreed', minutes.every((m) => m.includes('The first of March\n\nProposed by Bob.')), minutes);
+  const ts = [alice, bob, carol].map((p, i) => transcript(p, sessions[i]?.id ?? ''));
+  check('every entry on all three is signed by its author', ts.every((t) => t.signed));
+  const authors = new Set(ts[1]?.entries.map((l) => l.entry.from));
+  check('a called side holds entries from all three authors', authors.size === 3, [...authors]);
+}
+
+// A caller run by this script, which can send what a real node never would.
+async function puppet() {
+  const id = newIdentity('Mallory');
+  const ws = new WebSocket(relayUrl);
+  const got: any[] = [];
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(String(ev.data));
+    if (msg.t === 'challenge') {
+      ws.send(JSON.stringify({ t: 'hello', publicKey: id.publicKey, sig: signText(id, RELAY_AUTH + msg.nonce) }));
+    } else got.push(msg);
+  };
+  const next = async (pred: (m: any) => boolean, ms = 8000) => {
+    for (const deadline = Date.now() + ms; Date.now() < deadline; await Bun.sleep(50)) {
+      const i = got.findIndex(pred);
+      if (i >= 0) return got.splice(i, 1)[0];
+    }
+    throw new Error('the puppet never got what it waited for');
+  };
+  await next((m) => m.t === 'ready');
+  const send = (to: string, payload: object) => ws.send(JSON.stringify({ t: 'send', to, ref: 'x', payload }));
+  return {
+    id,
+    address: addressOf(id.publicKey),
+    got,
+    next,
+    send,
+    close: () => ws.close(),
+    control(to: string, body: object) {
+      const signed = JSON.stringify({ ...body, to, at: new Date().toISOString() });
+      send(to, { signed, sig: signText(id, signed), key: id.publicKey });
+    },
+  };
+}
+
+async function forgedForward() {
+  console.log('\n# a caller cannot put words in another side’s mouth');
+  const m = await puppet();
+  const ghost = newIdentity('Ghost');
+  const carolAddress = await carol.address();
+  carol.cursor = (await carol.rpc('status')).cursor;
+  const session = randomBytes(8).toString('hex');
+  const eph = newEphemeral();
+  m.control(carolAddress, { kind: 'ring', session, eph: eph.publicKey, group: 1 });
+  const answer = JSON.parse((await m.next((r) => r.t === 'recv' && typeof r.payload?.signed === 'string')).payload.signed);
+  check('a node answers a group ring with the group flag', answer.kind === 'ringing' && answer.group === 1, answer);
+  const keys = deriveSessionKeys(eph, answer.eph, session, 'caller');
+  let frames = 0;
+  const forward = (raw: string, sig: string) => {
+    const seq = frames++;
+    m.send(carolAddress, { kind: 'frame', session, seq, sealed: seal(keys.send, seq, JSON.stringify({ raw, sig })) });
+  };
+  const entry = (who: Identity, seq: number, body: object) =>
+    JSON.stringify({ session, seq, from: addressOf(who.publicKey), at: new Date().toISOString(), ...body });
+  const call = entry(m.id, 0, {
+    type: 'call',
+    name: 'Mallory',
+    title: 'Forged',
+    items: ['One'],
+    roster: [
+      { id: 'a', address: m.address, key: m.id.publicKey },
+      { id: 'b', address: addressOf(ghost.publicKey), key: ghost.publicKey },
+      { id: 'c', address: carolAddress, key: publicKey(carol) },
+    ],
+  });
+  forward(call, signText(m.id, call));
+  await carol.until('incoming');
+  await carol.rpc('approve', { accept: true });
+  const accept = entry(ghost, 0, { type: 'accept', name: 'Ghost' });
+  forward(accept, signText(ghost, accept));
+  await carol.until('opened');
+  const honest = entry(ghost, 1, { type: 'say', item: 'a1', text: 'signed by me' });
+  forward(honest, signText(ghost, honest));
+  const heard = await carol.until('say');
+  check(
+    'a forwarded entry signed by its author is taken, under that author',
+    heard.some((e) => e.kind === 'say' && e.text === 'signed by me' && e.by?.startsWith('Ghost')),
+    heard,
+  );
+  const signed = entry(ghost, 2, { type: 'say', item: 'a1', text: 'I agree to pay' });
+  forward(signed.replace('I agree to pay', 'I agree to pay double'), signText(ghost, signed));
+  const after = await carol.until('ended');
+  const ended = after.find((e) => e.kind === 'ended');
+  check(
+    'a forwarded entry whose text was changed is rejected',
+    ended?.kind === 'ended' && ended.reason.includes(`not signed by ${addressOf(ghost.publicKey)}`) && !after.some((e) => e.kind === 'say'),
+    after,
+  );
+  m.close();
+}
+
+async function olderSide() {
+  console.log('\n# a side whose parley cannot join a group');
+  const m = await puppet();
+  for (const p of [alice, bob]) p.cursor = (await p.rpc('status')).cursor;
+  await alice.rpc('call', { address: [await bob.address(), m.address], title: 'With an old node', items: ['One'] });
+  const ring = JSON.parse((await m.next((r) => r.t === 'recv' && typeof r.payload?.signed === 'string')).payload.signed);
+  for (let i = 0; i < 50 && (await bob.rpc('status')).session?.state !== 'ringing'; i++) await Bun.sleep(100);
+  const eph = newEphemeral();
+  // What 0.2.0 sends back: it drops the flag it does not know.
+  m.control(await alice.address(), { kind: 'ringing', session: ring.session, eph: eph.publicKey });
+  const ended = (await alice.until('ended')).find((e) => e.kind === 'ended');
+  check('a call to a side that does not echo the flag ends, saying why', ended?.kind === 'ended' && ended.reason.includes('cannot join a session of more than two'), ended);
+  await bob.until('ended');
+  check('the other called side is told at once and never given the agenda', (await bob.session()).title === '');
+  await Bun.sleep(300);
+  const keys = deriveSessionKeys(eph, ring.eph, ring.session, 'callee');
+  const types = m.got
+    .filter((r) => r.t === 'recv' && r.payload?.kind === 'frame')
+    .map((r) => JSON.parse(JSON.parse(unseal(keys.recv, r.payload.seq, r.payload.sealed)).raw).type);
+  check('the old side is sent nothing but a hangup', types.join() === 'hangup', types);
+  m.close();
+}
+
+async function groupThroughTools() {
+  console.log('\n# a session of three, through the tools');
+  const agents = [await agent(alice.root, 'e2e-alice-g'), await agent(bob.root, 'e2e-bob-g'), await agent(carol.root, 'e2e-carol-g')];
+  const [a, b, c] = agents as [Awaited<ReturnType<typeof agent>>, Awaited<ReturnType<typeof agent>>, Awaited<ReturnType<typeof agent>>];
+  for (const [x, name] of [[a, 'Alice'], [b, 'Bob'], [c, 'Carol']] as const) await x.tool('setup', { name });
+  for (const p of [alice, bob, carol]) p.cursor = (await p.rpc('status')).cursor;
+  const heard = async (x: typeof a, needle: string) => {
+    let all = '';
+    for (let i = 0; i < 10 && !all.includes(needle); i++) all += (await x.tool('wait', { timeout_seconds: 1 })).text;
+    return all;
+  };
+  const called = await a.tool('call', { to: [await bob.address(), await carol.address()], title: 'Three through tools', items: ['Venue', 'Budget'] });
+  check('the call tool rings two sides at once', !called.failed && called.text.startsWith('Calling.'), called);
+  await bob.until('incoming');
+  await carol.until('incoming');
+  await bob.rpc('approve', { accept: true });
+  await carol.rpc('approve', { accept: true });
+  const opened = await Promise.all([a, b, c].map((x) => heard(x, 'The session is open.')));
+  check('all three agents are told the session is open', opened.every((t) => t.includes('The session is open.')), opened);
+
+  await b.tool('say', { item: 'a1', text: 'The library' });
+  const [toA, toC] = await Promise.all([heard(a, 'The library'), heard(c, 'The library')]);
+  check('an agent’s say reaches both others, under its name', [toA, toC].every((t) => t.includes('Bob (b) said: The library')), [toA, toC]);
+  await a.tool('propose', { item: 'a1', text: 'The library on Friday' });
+  const offer = await heard(b, 'The library on Friday');
+  await heard(c, 'The library on Friday');
+  const ref = /\((a:\d+)\)/.exec(offer)?.[1] ?? '';
+  check('a proposal reaches the agents with its ref', ref.startsWith('a:'), offer);
+  await b.tool('agree', { item: 'a1', proposal: ref });
+  await heard(c, 'agreed to proposal');
+  check('one agree of two leaves the item open', (await carol.item('a1')).state === 'open');
+  const agreed = await c.tool('agree', { item: 'a1', proposal: ref });
+  check('the agree tool works on a group proposal', !agreed.failed, agreed);
+  await heard(a, 'agreed to proposal');
+  const items = await Promise.all([alice, bob, carol].map((p) => p.item('a1')));
+  check('the item closes on all three once both others agree', items.every((i) => i.state === 'agreed' && i.agreed?.text === 'The library on Friday'), items);
+  const status = await c.tool('status');
+  check('an agent’s status names the other two sides', status.text.includes('"Alice"') && status.text.includes('"Bob"'), status);
+
+  const hung = await a.tool('hang_up', { reason: 'enough for today' });
+  check('the hang_up tool works for the caller', !hung.failed, hung);
+  const ended = await Promise.all([b, c].map((x) => heard(x, 'The session ended')));
+  check('both called agents are told it ended', ended.every((t) => t.includes('The session ended: Alice (a) hung up: enough for today')), ended);
+  for (const x of agents) await x.client.close();
+}
+
+// Peers that send an alive every second, so a silent side is noticed fast.
+async function quickPeers(names: string[]) {
+  const peers = names.map((n) => new Peer(n));
+  extras.push(...peers);
+  for (const p of peers) {
+    p.init();
+    const config = readJson<Config>(p.home, 'config.json');
+    writeJson(p.home, 'config.json', { ...config, limits: { ...config.limits, aliveSeconds: 1 } });
+    p.start();
+    await connected(p);
+  }
+  return peers;
+}
+
+async function groupLosesSide() {
+  console.log('\n# a side of a group that goes silent');
+  const [jay, kim, lee] = (await quickPeers(['Jay', 'Kim', 'Lee'])) as [Peer, Peer, Peer];
+  await jay.rpc('call', { address: [await kim.address(), await lee.address()], title: 'One goes quiet', items: ['Plan', 'Later'] });
+  for (const p of [kim, lee]) await p.until('incoming');
+  for (const p of [kim, lee]) await p.rpc('approve', { accept: true });
+  for (const p of [jay, kim, lee]) await p.until('opened');
+  await kim.rpc('propose', { item: 'a1', text: 'Ship it' });
+  const offer = (await jay.until('propose')).find((e) => e.kind === 'propose');
+  await lee.until('propose');
+  await jay.rpc('agree', { item: 'a1', proposal: offer?.kind === 'propose' ? offer.ref : '' });
+  await kim.until('agree');
+  await Bun.sleep(1500);
+
+  const leePid = readJson<NodeInfo>(lee.home, 'node.json').pid;
+  process.kill(leePid, 'SIGSTOP');
+  try {
+    let quiet: number | undefined;
+    for (let i = 0; i < 60 && quiet === undefined; i++) {
+      await Bun.sleep(100);
+      quiet = (await jay.session()).sides?.find((x) => x.id === 'c')?.quietSeconds;
+    }
+    check('the caller shows which side has gone quiet', quiet !== undefined && jay.cli('status').includes('Nothing has been heard from "Lee"'), quiet);
+    const [leftJ, leftK] = await Promise.all([jay.until('left', 10_000), kim.until('left', 10_000)]);
+    const [j, k] = [leftJ.find((e) => e.kind === 'left'), leftK.find((e) => e.kind === 'left')];
+    check(
+      'a side that stops answering leaves, and both others are told why',
+      [j, k].every((e) => e?.kind === 'left' && e.who.startsWith('Lee') && e.reason === 'stopped answering'),
+      [j, k],
+    );
+    check('the session stays open for the two left', (await jay.session()).state === 'active' && (await kim.session()).state === 'active');
+    const closed = await Promise.all([jay.item('a1'), kim.item('a1')]);
+    check('what waited only on the leaver closes', closed.every((i) => i.state === 'agreed' && i.agreed?.text === 'Ship it'), closed);
+    await kim.rpc('say', { item: 'a2', text: 'just us' });
+    const toJay = await jay.until('say');
+    await jay.rpc('say', { item: 'a2', text: 'still here' });
+    const toKim = await kim.until('say');
+    check(
+      'the two left still talk',
+      toJay.some((e) => e.kind === 'say' && e.text === 'just us') && toKim.some((e) => e.kind === 'say' && e.text === 'still here'),
+      [toJay, toKim],
+    );
+  } finally {
+    process.kill(leePid, 'SIGCONT');
+  }
+  const lost = (await lee.until('ended', 15_000)).find((e) => e.kind === 'ended');
+  check('the side that went silent ends its own copy once it is back', lost?.kind === 'ended' && lost.reason === 'the caller stopped answering', lost);
+  check('and the caller never treated it as hanging up for everyone', (await jay.session()).state === 'active');
+
+  await kim.rpc('stop');
+  const gone = (await jay.until('ended', 10_000)).find((e) => e.kind === 'ended');
+  check(
+    'when the last called side goes offline, the session ends',
+    gone?.kind === 'ended' && gone.reason.includes('Kim') && gone.reason.includes('went offline'),
+    gone,
+  );
+  kim.start();
+  await connected(kim);
+}
+
+async function groupDialDropouts() {
+  console.log('\n# a group call with sides that cannot come');
+  for (const p of [alice, bob, carol]) p.cursor = (await p.rpc('status')).cursor;
+  await alice.rpc('call', { address: [await bob.address(), await carol.address()], title: 'One declines', items: ['One'] });
+  await bob.until('incoming');
+  await carol.until('incoming');
+  await carol.rpc('approve', { accept: false, reason: 'not my area' });
+  await carol.until('ended');
+  const declined = (await alice.until('left')).find((e) => e.kind === 'left');
+  check('a side that declines drops out', declined?.kind === 'left' && declined.who.startsWith('Carol') && declined.reason === 'declined: not my area', declined);
+  await bob.rpc('approve', { accept: true });
+  await alice.until('opened');
+  await bob.until('opened');
+  await alice.rpc('say', { item: 'a1', text: 'just the two of us' });
+  const said = await bob.until('say');
+  check('the call opens between the rest', said.some((e) => e.kind === 'say' && e.text === 'just the two of us') && (await alice.session()).state === 'active');
+  await alice.rpc('hangup', { reason: 'done' });
+  await alice.until('ended');
+  await bob.until('ended');
+
+  const [kim, lee] = [extras.find((p) => p.name === 'Kim')!, extras.find((p) => p.name === 'Lee')!];
+  await open(kim, lee, 'Already talking', ['One']);
+  const nobody = addressOf(newIdentity('Nobody').publicKey);
+  for (const p of [alice, bob]) p.cursor = (await p.rpc('status')).cursor;
+  await alice.rpc('call', { address: [await kim.address(), await bob.address(), nobody], title: 'Some cannot come', items: ['One'] });
+  await bob.until('incoming');
+  const lefts: Ev[] = [];
+  for (let i = 0; i < 20 && lefts.length < 2; i++) lefts.push(...(await alice.news(500)).filter((e) => e.kind === 'left'));
+  const bobs = await bob.session();
+  check('a busy side and an offline side drop out at dial time', lefts.length === 2 && lefts.some((e) => e.kind === 'left' && e.reason === 'in another session') && lefts.some((e) => e.kind === 'left' && e.reason === 'not online'), lefts);
+  check('with one side left, it is a call of two', bobs.sides === undefined && bobs.state === 'awaiting_approval' && bobs.title === 'Some cannot come', bobs);
+  await bob.rpc('approve', { accept: true });
+  await alice.until('opened');
+  check('and it opens', (await alice.session()).state === 'active' && (await alice.session()).peer.address === (await bob.address()));
+  await alice.rpc('hangup', { reason: 'done' });
+  await bob.until('ended');
+  await kim.rpc('hangup', { reason: 'done' });
+  await lee.until('ended');
+
+  await open(kim, lee, 'Still talking', ['One']);
+  await alice.rpc('call', { address: [await kim.address(), nobody], title: 'Nobody can come', items: ['One'] });
+  const none = (await alice.until('ended')).find((e) => e.kind === 'ended');
+  check('when every side drops out, the call ends saying so', none?.kind === 'ended' && none.reason.startsWith('no one called could join'), none);
+  await kim.rpc('hangup', { reason: 'done' });
+  await lee.until('ended');
+}
+
 const dave = new Peer('Dave');
 const extras: Peer[] = [dave];
 
@@ -831,6 +1221,12 @@ try {
   await olderInstalls();
   await whoAccepts();
   await badNetwork();
+  await threeSides();
+  await forgedForward();
+  await olderSide();
+  await groupThroughTools();
+  await groupLosesSide();
+  await groupDialDropouts();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.message : err);

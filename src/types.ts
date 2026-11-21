@@ -11,6 +11,7 @@ export const LIMITS = {
   text: 20_000,
   itemsAtCall: 20,
   itemsTotal: 50,
+  sides: 8,
 };
 
 const name = z.string().min(1).max(LIMITS.name);
@@ -18,6 +19,7 @@ const title = z.string().min(1).max(LIMITS.title);
 const reason = z.string().max(LIMITS.reason);
 const text = z.string().min(1).max(LIMITS.text);
 const item = z.string().min(1).max(12);
+const side = z.string().regex(/^[a-h]$/);
 
 const signedBase = {
   session: z.string(),
@@ -33,6 +35,11 @@ export const EntrySchema = z.discriminatedUnion('type', [
     name,
     title,
     items: z.array(title).min(1).max(LIMITS.itemsAtCall),
+    roster: z
+      .array(z.object({ id: side, address: z.string(), key: z.string().max(100) }))
+      .min(3)
+      .max(LIMITS.sides)
+      .optional(),
   }),
   z.object({ ...signedBase, type: z.literal('accept'), name }),
   z.object({ ...signedBase, type: z.literal('decline'), reason }),
@@ -42,6 +49,8 @@ export const EntrySchema = z.discriminatedUnion('type', [
   z.object({ ...signedBase, type: z.literal('agree'), item, ref: z.string() }),
   z.object({ ...signedBase, type: z.literal('drop'), item, reason }),
   z.object({ ...signedBase, type: z.literal('hangup'), reason }),
+  // Sent by the caller of a group when it loses a called side.
+  z.object({ ...signedBase, type: z.literal('left'), side, reason }),
 ]);
 
 export type Entry = z.infer<typeof EntrySchema>;
@@ -58,13 +67,16 @@ export const ControlSchema = z.object({
   to: z.string(),
   at: z.string(),
   eph: z.string().optional(),
+  // Asked for on the ring of a call with more than two sides, and echoed on
+  // the answer by a node that can take one. A 0.2.0 node drops it.
+  group: z.literal(1).optional(),
 });
 
 export type Control = z.infer<typeof ControlSchema>;
 
 export const ArgSchemas = {
   call: z.object({
-    address: z.string(),
+    address: z.union([z.string(), z.array(z.string()).min(1).max(LIMITS.sides - 1)]),
     title,
     items: z.array(title).min(1).max(LIMITS.itemsAtCall),
   }),
@@ -96,11 +108,25 @@ export type ItemView = {
   id: string;
   title: string;
   addedBy: Who | 'call';
+  addedById?: string;
   state: 'open' | 'agreed' | 'dropped';
   mine?: ProposalView;
   theirs?: ProposalView;
-  agreed?: { text: string; proposedBy: Who };
+  // A session of more than two: every other side's latest proposal.
+  others?: { ref: string; by: string; text: string; agreedBy: string[] }[];
+  agreed?: { text: string; proposedBy: Who; proposedById?: string };
   dropReason?: string;
+};
+
+export type SideView = {
+  id: string;
+  name?: string;
+  address: string;
+  you?: true;
+  knownSince?: string;
+  savedAs?: string;
+  left?: string;
+  quietSeconds?: number;
 };
 
 export type SessionView = {
@@ -110,6 +136,8 @@ export type SessionView = {
   peer: { address: string; name?: string; knownSince?: string; savedAs?: string };
   // Set on the copy an agent is given of a call nobody has accepted yet.
   withheld?: true;
+  // Only on a session of more than two sides, you included.
+  sides?: SideView[];
   title: string;
   items: ItemView[];
   endedReason?: string;
@@ -120,6 +148,7 @@ export type SessionView = {
 export type FeedEntry = {
   n: number;
   by: Who;
+  author?: string;
   at: string;
   type: Entry['type'];
   item?: string;
@@ -142,11 +171,12 @@ export type Ev = { n: number } & (
   | { kind: 'opened' }
   | { kind: 'ended'; reason: string }
   | { kind: 'impostor'; address: string }
-  | { kind: 'say'; item: string; text: string }
-  | { kind: 'add_item'; item: string; title: string }
-  | { kind: 'propose'; item: string; ref: string; text: string }
-  | { kind: 'agree'; item: string; ref: string }
-  | { kind: 'drop'; item: string; reason: string }
+  | { kind: 'say'; item: string; text: string; by?: string }
+  | { kind: 'add_item'; item: string; title: string; by?: string }
+  | { kind: 'propose'; item: string; ref: string; text: string; by?: string }
+  | { kind: 'agree'; item: string; ref: string; by?: string }
+  | { kind: 'drop'; item: string; reason: string; by?: string }
+  | { kind: 'left'; who: string; reason: string }
 );
 
 export type EvBody = Ev extends infer E

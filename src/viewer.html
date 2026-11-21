@@ -380,6 +380,8 @@
             return note(who + ' dropped ' + f.item + ': ' + f.text);
           case 'hangup':
             return note(who + ' hung up: ' + f.text);
+          case 'left':
+            return note('Left the session: ' + f.text);
         }
         const msg = el('div', 'msg' + (mine ? ' mine' : '') + (f.type === 'propose' ? ' propose' : ''));
         const meta = el('div', 'meta');

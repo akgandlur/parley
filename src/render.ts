@@ -1,4 +1,4 @@
-import type { Ev, ItemView, SessionView, View } from './types';
+import type { Ev, ItemView, SessionView, SideView, View } from './types';
 
 const STATE_TEXT: Record<SessionView['state'], string> = {
   dialing: 'calling',
@@ -9,8 +9,18 @@ const STATE_TEXT: Record<SessionView['state'], string> = {
   ended: 'ended',
 };
 
+const label = (x: SideView) =>
+  `${x.name ? `"${x.name}"` : 'an unnamed side'} (${x.id}, ${x.address})${x.left ? `, who left: ${x.left}` : ''}`;
+
 const who = (s: SessionView) =>
-  `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? 'a new caller' : 'an unnamed caller'} (${s.peer.address})`;
+  s.sides
+    ? s.sides.filter((x) => !x.you).map(label).join(', ')
+    : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? 'a new caller' : 'an unnamed caller'} (${s.peer.address})`;
+
+const sideName = (s: SessionView, id: string) => {
+  const x = s.sides?.find((y) => y.id === id);
+  return x?.you ? 'you' : `${x?.name ?? x?.address ?? 'unknown'} (${id})`;
+};
 
 // Until a person accepts, the caller's name and agenda are a stranger's
 // words: anyone who has the address can ring. The person is shown them
@@ -29,13 +39,20 @@ export function forAgent(v: View): View {
       title: '',
       items: [],
       peer: { ...s.peer, name: s.peer.savedAs },
+      sides: s.sides?.map((x) => (x.you ? x : { ...x, name: x.savedAs })),
     },
   };
 }
 
-function renderItem(i: ItemView): string {
+function renderItem(i: ItemView, s: SessionView): string {
   const lines = [`  ${i.id} [${i.state}] ${i.title}`];
   if (i.agreed) lines.push(`      agreed: ${i.agreed.text}`);
+  for (const o of i.others ?? []) {
+    const agreed = o.agreedBy.map((id) => sideName(s, id));
+    lines.push(
+      `      ${sideName(s, o.by)} proposes (${o.ref}): ${o.text}${agreed.length ? ` [agreed by ${agreed.join(', ')}]` : ''}`,
+    );
+  }
   if (i.state === 'dropped') lines.push(`      dropped: ${i.dropReason}`);
   if (i.theirs) {
     lines.push(`      they propose (${i.theirs.ref}): ${i.theirs.text}`);
@@ -79,12 +96,18 @@ export function renderView(v: View): string {
       `Nothing has been heard from the other side for ${s.peerQuietSeconds} seconds; it may be offline.`,
     );
   }
+  for (const x of s.sides ?? []) {
+    if (x.quietSeconds === undefined) continue;
+    lines.push(
+      `Nothing has been heard from ${label(x)} for ${x.quietSeconds} seconds; it may be offline.`,
+    );
+  }
   if (s.withheld) {
     lines.push(
       'What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.',
     );
   }
-  if (s.title) lines.push(`Agenda: ${s.title}`, ...s.items.map(renderItem));
+  if (s.title) lines.push(`Agenda: ${s.title}`, ...s.items.map((i) => renderItem(i, s)));
   if (s.minutes) lines.push(`Minutes: ${s.minutes}`);
   return lines.join('\n');
 }
@@ -103,15 +126,19 @@ export function renderEvent(e: Ev, v: View): string {
     case 'impostor':
       return `A call from ${e.address} was refused. That address is one of your contacts, but the caller did not hold the key saved for it, so it is not that contact. Tell your user.`;
     case 'say':
-      return `[${e.item}] they said: ${e.text}`;
+      return `[${e.item}] ${e.by ?? 'they'} said: ${e.text}`;
     case 'add_item':
-      return `[${e.item}] they added an agenda item: ${e.title}`;
+      return `[${e.item}] ${e.by ?? 'they'} added an agenda item: ${e.title}`;
     case 'propose':
-      return `[${e.item}] they propose (${e.ref}): ${e.text}`;
+      return `[${e.item}] ${e.by ?? 'they'} propose${e.by ? 's' : ''} (${e.ref}): ${e.text}`;
     case 'agree':
-      return `[${e.item}] they agreed to your proposal ${e.ref}. The item is closed.`;
+      return e.by
+        ? `[${e.item}] ${e.by} agreed to proposal ${e.ref}.`
+        : `[${e.item}] they agreed to your proposal ${e.ref}. The item is closed.`;
     case 'drop':
-      return `[${e.item}] they dropped the item: ${e.reason}`;
+      return `[${e.item}] ${e.by ?? 'they'} dropped the item: ${e.reason}`;
+    case 'left':
+      return `${e.who} left the session: ${e.reason}`;
   }
 }
 
@@ -120,16 +147,27 @@ export function renderMinutes(v: View, started: Date, ended: Date): string {
   if (!s) throw new Error('no session to write minutes for');
   const mine = `${v.me.name} (${v.me.address})`;
   const theirs = `${s.peer.name} (${s.peer.address})`;
-  const by = (p: 'me' | 'peer') => (p === 'me' ? v.me.name : s.peer.name);
+  const named = (id: string) => {
+    const x = s.sides?.find((y) => y.id === id);
+    return x?.name ?? x?.address;
+  };
+  const by = (p: 'me' | 'peer', id?: string) =>
+    id ? named(id) : p === 'me' ? v.me.name : s.peer.name;
   const of = (state: ItemView['state']) => s.items.filter((i) => i.state === state);
   const added = (i: ItemView) =>
-    i.addedBy === 'call' ? '' : ` (added during the session by ${by(i.addedBy)})`;
+    i.addedBy === 'call' ? '' : ` (added during the session by ${by(i.addedBy, i.addedById)})`;
+  const all = s.sides?.map((x) => `${x.name ?? 'unnamed'} (${x.address})`);
+  const between = all
+    ? `${all.slice(0, -1).join(', ')} and ${all.at(-1)}`
+    : `${mine} and ${theirs}`;
+  const leavers = s.sides?.filter((x) => x.left) ?? [];
 
   const out = [
     `# ${s.title}`,
     '',
-    `- Between: ${mine} and ${theirs}`,
-    `- Called by: ${s.role === 'caller' ? v.me.name : s.peer.name}`,
+    `- Between: ${between}`,
+    `- Called by: ${s.sides ? named('a') : s.role === 'caller' ? v.me.name : s.peer.name}`,
+    ...leavers.map((x) => `- Left early: ${x.name ?? x.address}: ${x.left}`),
     `- Started: ${started.toISOString()}`,
     `- Ended: ${ended.toISOString()}`,
     `- How it ended: ${s.endedReason}`,
@@ -140,7 +178,7 @@ export function renderMinutes(v: View, started: Date, ended: Date): string {
   for (const i of of('agreed')) {
     out.push(`### ${i.id} · ${i.title}${added(i)}`, '');
     if (i.agreed) {
-      out.push(i.agreed.text, '', `Proposed by ${by(i.agreed.proposedBy)}.`, '');
+      out.push(i.agreed.text, '', `Proposed by ${by(i.agreed.proposedBy, i.agreed.proposedById)}.`, '');
     }
   }
   if (!of('agreed').length) out.push('Nothing.', '');
@@ -154,7 +192,7 @@ export function renderMinutes(v: View, started: Date, ended: Date): string {
   if (!of('open').length) out.push('Nothing.');
   out.push(
     '',
-    'Every entry both sides sent is in transcript.jsonl beside this file, each one signed by its sender.',
+    `Every entry ${s.sides ? 'every side' : 'both sides'} sent is in transcript.jsonl beside this file, each one signed by its sender.`,
     '',
   );
   return out.join('\n');
