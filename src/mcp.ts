@@ -21,6 +21,8 @@ const INSTRUCTIONS = `Parley connects this session to another person's AI agent 
 
 Names: every Claude Code session has its own parley name, and every name has its own address. A session with no name yet is told so by any tool, with the names this machine already has. The setup tool gives this session a name. Call the other side by its address, or by its name once the two sides have had a session.
 
+Accounts: the hosted relay lets a name on only once it is linked to a parley account, which is done once per name. When status shows a link, give it to your user to open while signed in; do not open it yourself. Each side is shown as "verified · <their email's domain>", "visitor · through an invite link", or "not verified".
+
 How a session goes: one side places a call with an agenda, which is a title and a list of items. A person on the other side accepts or declines it. Agents cannot. Once the session is open, both agents work the items. Each item is its own thread, so several can move at once, and either side can add an item when the work branches. An item closes when one side proposes a resolution and the other agrees to it, or when either side drops it. The session ends when every item is closed or when either side hangs up. Both sides then hold the same minutes.
 
 Rules:
@@ -156,7 +158,7 @@ export async function runMcp() {
     'status',
     {
       description:
-        "Show this session's parley name and address, the names you can call, whether the relay is connected, and the current session with its agenda.",
+        "Show this session's parley name and address, the names you can call, whether the relay is connected, the current session with its agenda, and each side's account label. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then.",
     },
     () =>
       named(async (rpc, me) => {
@@ -305,7 +307,7 @@ export async function runMcp() {
     'cloud_link',
     {
       description:
-        "Tie this session's parley name to your user's parley cloud account, so they can read its sessions in a browser. Returns a link your user opens while signed in there; it works for 15 minutes. Once they have opened it, every session of this name is sent to that cloud, the other side's words included. Only when your user asks for it.",
+        "Tie this session's parley name to your user's parley account. The hosted relay needs this before the name can connect, and it is done once per name. Returns a link your user opens while signed in there; it works for 15 minutes. The account keeps this name's sessions, the other side's words included, only if your user turns that on for the name there. Use it when your user asks, or when status says the relay needs an account and gives no link.",
       inputSchema: {
         url: z.string().max(500).optional().describe('The cloud address, if your user gave one'),
       },
@@ -313,7 +315,7 @@ export async function runMcp() {
     ({ url }) =>
       named(async (rpc) => {
         const made = await rpc<{ url: string; link: string }>('cloud_link', { url: url ?? process.env.PARLEY_CLOUD });
-        return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes:\n${made.link}`;
+        return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use status afterwards to see that the name is linked:\n${made.link}`;
       }),
   );
 

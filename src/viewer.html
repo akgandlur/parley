@@ -338,6 +338,8 @@
         new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       const sideOf = (s, id) => s.sides.find((x) => x.id === id);
+      const verifiedText = (v) =>
+        !v ? 'not verified' : v.kind === 'visitor' ? 'visitor · through an invite link' : v.domain ? 'verified · ' + v.domain : 'verified';
       const nameOf = (x) => (x ? x.savedAs || x.name || x.address : 'Someone');
       const names = (list) =>
         list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
@@ -358,6 +360,8 @@
                   nameOf(caller) + ' is calling',
                   'Waiting for you to accept. ' +
                     caller.address +
+                    ' · ' +
+                    verifiedText(caller.verified) +
                     '. ' +
                     (caller.knownSince
                       ? 'First connected on ' + caller.knownSince.slice(0, 10) + '.'
@@ -377,6 +381,7 @@
         if (!s) return ['', 'No call yet', 'This page updates by itself when your Claude calls or is called.'];
         if (s.sides) return groupHeadline(s);
         const them = s.peer.name ? s.peer.name : s.peer.address;
+        const label = verifiedText(s.peer.verified);
         const known = s.peer.knownSince
           ? 'First connected on ' + s.peer.knownSince.slice(0, 10) + '.'
           : 'This address has not connected here before.';
@@ -388,13 +393,13 @@
           case 'awaiting_approval':
             return s.role === 'caller'
               ? ['wait', 'Waiting for a person to accept', 'Your Claude called ' + s.peer.address + '.']
-              : ['wait', them + ' is calling', 'Waiting for you to accept. ' + s.peer.address + '. ' + known];
+              : ['wait', them + ' is calling', 'Waiting for you to accept. ' + s.peer.address + ' · ' + label + '. ' + known];
           case 'active':
-            return ['live', 'Connected with ' + them, s.peer.address];
+            return ['live', 'Connected with ' + them, s.peer.address + ' · ' + label];
           case 'closing':
             return ['wait', 'Ending…', s.peer.address];
           default:
-            return ['', 'Ended: ' + s.endedReason, them + ' · ' + s.peer.address];
+            return ['', 'Ended: ' + s.endedReason, them + ' · ' + s.peer.address + ' · ' + label];
         }
       }
 
@@ -410,7 +415,7 @@
             head.append(el('span', 'id', x.id), name);
             if (x.you) head.append(el('span', 'chip', 'you'));
             if (x.left) head.append(el('span', 'chip dropped', 'left'));
-            row.append(head);
+            row.append(head, el('div', 'votes', verifiedText(x.verified)));
             if (x.left) row.append(el('div', 'outcome', x.left));
             return row;
           }),
@@ -494,6 +499,7 @@
         $('me').replaceChildren(
           document.createTextNode(view.me.name + ' · '),
           el('code', '', view.me.address),
+          document.createTextNode(' · ' + verifiedText(view.me.verified)),
           document.createTextNode(view.relay.connected ? ' · relay connected' : ' · relay NOT connected'),
         );
         const [dot, title, detail] = headline(view);

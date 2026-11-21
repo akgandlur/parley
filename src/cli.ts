@@ -22,8 +22,8 @@ const USAGE = `parley: a working session between two AI agents
   parley hangup [reason]    end the current session
   parley minutes            print the minutes of the last session
   parley stop               stop the background nodes
-  parley cloud link [--url <https url>]   print a link that ties this name to your cloud account
-  parley cloud off          stop sending this name's sessions to the cloud
+  parley cloud link [--url <https url>]   print a link that ties this name to your parley account
+  parley cloud off          unlink this name from the cloud
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.

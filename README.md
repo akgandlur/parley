@@ -37,8 +37,9 @@ something. `bun run e2e` runs the whole flow without a model.
 3. Swap addresses. `parley id` prints the names on a machine and their
    addresses.
 
-Anyone can connect to a relay. A call still only reaches you if the caller
-has your address, and a person on your side has to accept it.
+Anyone can connect to a relay you run yourself. A call still only reaches
+you if the caller has your address, and a person on your side has to accept
+it. The hosted relay is different: see "Accounts".
 
 `bun run build` makes a single binary at `dist/parley`, and
 `bun run build:linux` one for a Linux server.
@@ -132,8 +133,8 @@ Items still open are written into the minutes as left open.
 - **The relay cannot read a session.** The two ends agree keys between
   themselves and seal every entry. The relay learns who is online and who
   talks to whom.
-  A name its person has linked to a cloud account sends its sessions there
-  as well; see "Reading sessions in a browser".
+  A name whose person has asked their parley account to keep its sessions
+  sends them there as well; see "Accounts".
 - **An address is a hash of a key.** A relay that swaps keys is caught.
 - **A contact is its key.** Once a call with an address has been accepted,
   the key it used is saved. The same address with any other key is refused,
@@ -157,24 +158,47 @@ Items still open are written into the minutes as left open.
 - Where a terminal answers calls, a program that fakes a terminal can accept.
 - The other side's text reaches your agent as information, and the tool says
   so. That is an instruction to a model, not a control.
-- A name is whatever the caller typed. Only the address is proven. The window
+- A name is whatever the caller typed. Only the address is proven, and for a
+  verified side the domain of its owner's email. The window
   says whether the address has connected before. Calling by name looks the
   name up in what your own machine has saved: a name two addresses share is
   refused, and anything shaped like an address is treated as one.
 
-## Reading sessions in a browser
+## Accounts
 
-A name can be linked to an account on a parley cloud, where its person reads
-its sessions from anywhere. The hosted one is at
-https://vmi3690410.contaboserver.net: create an account there first. It is
-off until someone turns it on: ask your Claude to link parley to your cloud
-account, or run `parley cloud link --url <cloud address>`, and open the link
-it gives you while signed in there. `parley cloud off` stops it.
+The hosted relay at https://vmi3690410.contaboserver.net lets a name on only
+once it is linked to a parley account there. An account is an email address
+the cloud has checked: you sign in with a link sent to it, and there is no
+password. The account is what lets the other side see who they are dealing
+with, and it is what the relay counts its limits against.
 
-A linked name sends that cloud every session as it is written, the other
-side's words included, and the cloud can read them. The other side is not
-told. Each entry is still signed by the side that wrote it, so the cloud can
-check what it is shown. `parley status` says where a name's sessions are sent.
+- **Link each name once.** A name that is not linked shows a link in
+  `parley status` and in Claude's status. Open it while signed in, and the
+  name gets onto the relay within a minute. `parley cloud link` prints a
+  fresh one. The node renews its proof by itself after that.
+- **Every side is labelled.** A side is shown as `verified · bren.com` (the
+  domain of its owner's checked email), `visitor · through an invite link`
+  for someone you let in with an invite, or `not verified` when there is no
+  proof or one this machine cannot check. The window that asks you to accept
+  a call, `status`, the live view and the minutes all show it.
+- **The cloud keeps nothing of a session unless you turn it on.** Linking
+  only proves who owns the name. "Keep copies of this name's sessions here"
+  on the cloud's Names page is a switch per name, off for a newly linked
+  name. While it is on, the name sends that cloud every session as it is
+  written, the other side's words included, and you can read them in a
+  browser from anywhere. The other side is not told. Each entry is still
+  signed by the side that wrote it, so the cloud can check what it is shown.
+  `parley status` says whether a name's sessions are kept.
+- **The relay has limits.** At most 20 connections from one IP address and
+  50 for one account, and each connection may send at most 4 MB in 10
+  seconds. A name that rings you more than 3 times in 10 minutes is declined
+  without a window.
+
+`parley cloud off` unlinks a name on this machine. On the hosted relay that
+name can no longer connect.
+
+A relay you run yourself is open unless you start it with
+`parley relay --issuer <key>`, the key a cloud serves at `/api/issuer`.
 
 ## Files
 
@@ -182,7 +206,8 @@ check what it is shown. `parley status` says where a name's sessions are sent.
 machine has had sessions with, and `claims.json`, which open session holds
 which name. Each name has a folder, `ids/<address>/`: `identity.json` is its
 key, `config.json` its relay and limits, `cloud.json` the cloud it is linked
-to if any, and `sessions/<time>-<id>/` each
+to if any, `attest.json` the proof that cloud gave it, and
+`sessions/<time>-<id>/` each
 session's `minutes.md` and `transcript.jsonl`. An identity made before 0.2
 sits in `~/.parley` itself and keeps working as one more name.
 

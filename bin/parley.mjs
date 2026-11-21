@@ -34,7 +34,7 @@ var __toESM = (mod, isNodeMode, target) => {
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 
-// node_modules/ajv/dist/compile/codegen/code.js
+// ../parley/node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = undefined;
@@ -188,7 +188,7 @@ var require_code = __commonJS(function(exports) {
   exports.regexpCode = regexpCode;
 });
 
-// node_modules/ajv/dist/compile/codegen/scope.js
+// ../parley/node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = undefined;
@@ -334,7 +334,7 @@ var require_scope = __commonJS(function(exports) {
   exports.ValueScope = ValueScope;
 });
 
-// node_modules/ajv/dist/compile/codegen/index.js
+// ../parley/node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = undefined;
@@ -1044,7 +1044,7 @@ var require_codegen = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/compile/util.js
+// ../parley/node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = undefined;
@@ -1208,7 +1208,7 @@ var require_util = __commonJS(function(exports) {
   exports.checkStrictMode = checkStrictMode;
 });
 
-// node_modules/ajv/dist/compile/names.js
+// ../parley/node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -1233,7 +1233,7 @@ var require_names = __commonJS(function(exports) {
   exports.default = names;
 });
 
-// node_modules/ajv/dist/compile/errors.js
+// ../parley/node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = undefined;
@@ -1351,7 +1351,7 @@ var require_errors = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/compile/validate/boolSchema.js
+// ../parley/node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = undefined;
@@ -1399,7 +1399,7 @@ var require_boolSchema = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/compile/rules.js
+// ../parley/node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getRules = exports.isJSONType = undefined;
@@ -1427,7 +1427,7 @@ var require_rules = __commonJS(function(exports) {
   exports.getRules = getRules;
 });
 
-// node_modules/ajv/dist/compile/validate/applicability.js
+// ../parley/node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = undefined;
@@ -1447,7 +1447,7 @@ var require_applicability = __commonJS(function(exports) {
   exports.shouldUseRule = shouldUseRule;
 });
 
-// node_modules/ajv/dist/compile/validate/dataType.js
+// ../parley/node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = undefined;
@@ -1628,7 +1628,7 @@ var require_dataType = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/compile/validate/defaults.js
+// ../parley/node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assignDefaults = undefined;
@@ -1662,7 +1662,7 @@ var require_defaults = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/vocabularies/code.js
+// ../parley/node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = undefined;
@@ -1791,7 +1791,7 @@ var require_code2 = __commonJS(function(exports) {
   exports.validateUnion = validateUnion;
 });
 
-// node_modules/ajv/dist/compile/validate/keyword.js
+// ../parley/node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = undefined;
@@ -1906,7 +1906,7 @@ var require_keyword = __commonJS(function(exports) {
   exports.validateKeywordUsage = validateKeywordUsage;
 });
 
-// node_modules/ajv/dist/compile/validate/subschema.js
+// ../parley/node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = undefined;
@@ -1986,7 +1986,7 @@ var require_subschema = __commonJS(function(exports) {
   exports.extendSubschemaMode = extendSubschemaMode;
 });
 
-// node_modules/fast-deep-equal/index.js
+// ../parley/node_modules/fast-deep-equal/index.js
 var require_fast_deep_equal = __commonJS(function(exports, module) {
   module.exports = function equal(a, b) {
     if (a === b)
@@ -2028,7 +2028,7 @@ var require_fast_deep_equal = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/json-schema-traverse/index.js
+// ../parley/node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS(function(exports, module) {
   var traverse = module.exports = function(schema, opts, cb) {
     if (typeof opts == "function") {
@@ -2111,7 +2111,7 @@ var require_json_schema_traverse = __commonJS(function(exports, module) {
   }
 });
 
-// node_modules/ajv/dist/compile/resolve.js
+// ../parley/node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = undefined;
@@ -2264,7 +2264,7 @@ var require_resolve = __commonJS(function(exports) {
   exports.getSchemaRefs = getSchemaRefs;
 });
 
-// node_modules/ajv/dist/compile/validate/index.js
+// ../parley/node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getData = exports.KeywordCxt = exports.validateFunctionCode = undefined;
@@ -2769,7 +2769,7 @@ var require_validate = __commonJS(function(exports) {
   exports.getData = getData;
 });
 
-// node_modules/ajv/dist/runtime/validation_error.js
+// ../parley/node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
 
@@ -2783,7 +2783,7 @@ var require_validation_error = __commonJS(function(exports) {
   exports.default = ValidationError;
 });
 
-// node_modules/ajv/dist/compile/ref_error.js
+// ../parley/node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var resolve_1 = require_resolve();
@@ -2798,7 +2798,7 @@ var require_ref_error = __commonJS(function(exports) {
   exports.default = MissingRefError;
 });
 
-// node_modules/ajv/dist/compile/index.js
+// ../parley/node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = undefined;
@@ -3019,7 +3019,7 @@ var require_compile = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/refs/data.json
+// ../parley/node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS(function(exports, module) {
   module.exports = {
     $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
@@ -3036,7 +3036,7 @@ var require_data = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/fast-uri/lib/utils.js
+// ../parley/node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS(function(exports, module) {
   var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
   var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -3585,7 +3585,7 @@ var require_utils = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/fast-uri/lib/schemes.js
+// ../parley/node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS(function(exports, module) {
   var { isUUID } = require_utils();
   var URN_REG = /^([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-./:;=@]|%[\da-f]{2})+)$/iu;
@@ -3760,7 +3760,7 @@ var require_schemes = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/fast-uri/index.js
+// ../parley/node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS(function(exports, module) {
   var { normalizeIPv6, removeDotSegments, removeDotSegmentsRelative, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
   var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -4185,7 +4185,7 @@ var require_fast_uri = __commonJS(function(exports, module) {
   module.exports.fastUri = fastUri;
 });
 
-// node_modules/ajv/dist/runtime/uri.js
+// ../parley/node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var uri = require_fast_uri();
@@ -4193,7 +4193,7 @@ var require_uri = __commonJS(function(exports) {
   exports.default = uri;
 });
 
-// node_modules/ajv/dist/core.js
+// ../parley/node_modules/ajv/dist/core.js
 var require_core = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = undefined;
@@ -4786,7 +4786,7 @@ var require_core = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv/dist/vocabularies/core/id.js
+// ../parley/node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var def = {
@@ -4798,7 +4798,7 @@ var require_id = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/core/ref.js
+// ../parley/node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.callRef = exports.getValidate = undefined;
@@ -4917,7 +4917,7 @@ var require_ref = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/core/index.js
+// ../parley/node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var id_1 = require_id();
@@ -4935,7 +4935,7 @@ var require_core2 = __commonJS(function(exports) {
   exports.default = core;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4964,7 +4964,7 @@ var require_limitNumber = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -4989,7 +4989,7 @@ var require_multipleOf = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/runtime/ucs2length.js
+// ../parley/node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   function ucs2length(str) {
@@ -5012,7 +5012,7 @@ var require_ucs2length = __commonJS(function(exports) {
   ucs2length.code = 'require("ajv/dist/runtime/ucs2length").default';
 });
 
-// node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5041,7 +5041,7 @@ var require_limitLength = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/pattern.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5075,7 +5075,7 @@ var require_pattern = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5101,7 +5101,7 @@ var require_limitProperties = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/required.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5180,7 +5180,7 @@ var require_required = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5206,7 +5206,7 @@ var require_limitItems = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/runtime/equal.js
+// ../parley/node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var equal = require_fast_deep_equal();
@@ -5214,7 +5214,7 @@ var require_equal = __commonJS(function(exports) {
   exports.default = equal;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var dataType_1 = require_dataType();
@@ -5278,7 +5278,7 @@ var require_uniqueItems = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/const.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5304,7 +5304,7 @@ var require_const = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/enum.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5350,7 +5350,7 @@ var require_enum = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/validation/index.js
+// ../parley/node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var limitNumber_1 = require_limitNumber();
@@ -5380,7 +5380,7 @@ var require_validation = __commonJS(function(exports) {
   exports.default = validation;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateAdditionalItems = undefined;
@@ -5430,7 +5430,7 @@ var require_additionalItems = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/items.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateTuple = undefined;
@@ -5484,7 +5484,7 @@ var require_items = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var items_1 = require_items();
@@ -5498,7 +5498,7 @@ var require_prefixItems = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5530,7 +5530,7 @@ var require_items2020 = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/contains.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5621,7 +5621,7 @@ var require_contains = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = undefined;
@@ -5706,7 +5706,7 @@ var require_dependencies = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -5746,7 +5746,7 @@ var require_propertyNames = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5849,7 +5849,7 @@ var require_additionalProperties = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/properties.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var validate_1 = require_validate();
@@ -5904,7 +5904,7 @@ var require_properties = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -5975,7 +5975,7 @@ var require_patternProperties = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/not.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
@@ -6003,7 +6003,7 @@ var require_not = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var code_1 = require_code2();
@@ -6017,7 +6017,7 @@ var require_anyOf = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -6072,7 +6072,7 @@ var require_oneOf = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
@@ -6096,7 +6096,7 @@ var require_allOf = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/if.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -6162,7 +6162,7 @@ var require_if = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var util_1 = require_util();
@@ -6177,7 +6177,7 @@ var require_thenElse = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/applicator/index.js
+// ../parley/node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var additionalItems_1 = require_additionalItems();
@@ -6220,7 +6220,7 @@ var require_applicator = __commonJS(function(exports) {
   exports.default = getApplicator;
 });
 
-// node_modules/ajv/dist/vocabularies/format/format.js
+// ../parley/node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -6307,7 +6307,7 @@ var require_format = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/vocabularies/format/index.js
+// ../parley/node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var format_1 = require_format();
@@ -6315,7 +6315,7 @@ var require_format2 = __commonJS(function(exports) {
   exports.default = format;
 });
 
-// node_modules/ajv/dist/vocabularies/metadata.js
+// ../parley/node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.contentVocabulary = exports.metadataVocabulary = undefined;
@@ -6335,7 +6335,7 @@ var require_metadata = __commonJS(function(exports) {
   ];
 });
 
-// node_modules/ajv/dist/vocabularies/draft7.js
+// ../parley/node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var core_1 = require_core2();
@@ -6354,7 +6354,7 @@ var require_draft7 = __commonJS(function(exports) {
   exports.default = draft7Vocabularies;
 });
 
-// node_modules/ajv/dist/vocabularies/discriminator/types.js
+// ../parley/node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.DiscrError = undefined;
@@ -6365,7 +6365,7 @@ var require_types = __commonJS(function(exports) {
   })(DiscrError || (exports.DiscrError = DiscrError = {}));
 });
 
-// node_modules/ajv/dist/vocabularies/discriminator/index.js
+// ../parley/node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var codegen_1 = require_codegen();
@@ -6467,7 +6467,7 @@ var require_discriminator = __commonJS(function(exports) {
   exports.default = def;
 });
 
-// node_modules/ajv/dist/refs/json-schema-draft-07.json
+// ../parley/node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS(function(exports, module) {
   module.exports = {
     $schema: "http://json-schema.org/draft-07/schema#",
@@ -6622,7 +6622,7 @@ var require_json_schema_draft_07 = __commonJS(function(exports, module) {
   };
 });
 
-// node_modules/ajv/dist/ajv.js
+// ../parley/node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS(function(exports, module) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = undefined;
@@ -6690,7 +6690,7 @@ var require_ajv = __commonJS(function(exports, module) {
   } });
 });
 
-// node_modules/ajv-formats/dist/formats.js
+// ../parley/node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.formatNames = exports.fastFormats = exports.fullFormats = undefined;
@@ -6867,7 +6867,7 @@ var require_formats = __commonJS(function(exports) {
   }
 });
 
-// node_modules/ajv-formats/dist/limit.js
+// ../parley/node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.formatLimitDefinition = undefined;
@@ -6936,7 +6936,7 @@ var require_limit = __commonJS(function(exports) {
   exports.default = formatLimitPlugin;
 });
 
-// node_modules/ajv-formats/dist/index.js
+// ../parley/node_modules/ajv-formats/dist/index.js
 var require_dist = __commonJS(function(exports, module) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var formats_1 = require_formats();
@@ -7253,7 +7253,7 @@ function take(address) {
   writeJson(ROOT2, "claims.json", claims);
 }
 
-// node_modules/zod/v4/core/util.js
+// ../parley/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
   const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -7808,7 +7808,7 @@ function constantCatch(value) {
   return fn;
 }
 
-// node_modules/zod/v4/core/core.js
+// ../parley/node_modules/zod/v4/core/core.js
 var _a;
 var _zodDesc = { value: undefined, enumerable: false };
 var _E = "captureStackTrace" in Error ? Error : null;
@@ -7926,7 +7926,7 @@ function config(newConfig) {
     Object.assign(globalConfig, newConfig);
   return globalConfig;
 }
-// node_modules/zod/v4/core/errors.js
+// ../parley/node_modules/zod/v4/core/errors.js
 function _getMessage() {
   const internals = this._zod;
   internals.message ?? (internals.message = JSON.stringify(internals.def, jsonStringifyReplacer, 2));
@@ -8041,7 +8041,7 @@ function formatError(error, mapper = (issue) => issue.message) {
   return fieldErrors;
 }
 
-// node_modules/zod/v4/core/parse.js
+// ../parley/node_modules/zod/v4/core/parse.js
 function finalizeParams(callee, params) {
   return { callee: params?.callee ?? callee, Err: params?.Err };
 }
@@ -8192,7 +8192,7 @@ var _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
 var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
   return _safeParseAsync(_Err)(schema, value, _ctx);
 };
-// node_modules/zod/v4/core/regexes.js
+// ../parley/node_modules/zod/v4/core/regexes.js
 var cuid = /^[cC][0-9a-z]{6,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$/;
@@ -8251,7 +8251,7 @@ var _null = /^null$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
-// node_modules/zod/v4/core/checks.js
+// ../parley/node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
   var _a;
   inst._zod ?? (inst._zod = {});
@@ -8567,7 +8567,7 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
   };
 });
 
-// node_modules/zod/v4/core/doc.js
+// ../parley/node_modules/zod/v4/core/doc.js
 class Doc {
   constructor(args = [], closed = {}) {
     this.content = [];
@@ -8609,14 +8609,14 @@ ${content.join(`
   }
 }
 
-// node_modules/zod/v4/core/versions.js
+// ../parley/node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
   minor: 6,
   patch: 7
 };
 
-// node_modules/zod/v4/core/schemas.js
+// ../parley/node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   var _a;
   inst ?? (inst = {});
@@ -10272,7 +10272,7 @@ function handleRefineResult(result, payload, input, inst) {
     payload.issues.push(issue(_iss));
   }
 }
-// node_modules/zod/v4/core/memoizer.js
+// ../parley/node_modules/zod/v4/core/memoizer.js
 class $ZodCyclicError extends Error {
   constructor() {
     super(`Cannot parse a reference cycle that closes through a transform`);
@@ -10541,7 +10541,7 @@ function isBackEdge(ctx, value) {
   const backEdges = ctx[STATE]?.backEdges;
   return backEdges !== undefined && isRef(value) && backEdges.has(value);
 }
-// node_modules/zod/v4/locales/en.js
+// ../parley/node_modules/zod/v4/locales/en.js
 var error = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
@@ -10663,7 +10663,7 @@ function en_default() {
     localeError: error()
   };
 }
-// node_modules/zod/v4/core/registries.js
+// ../parley/node_modules/zod/v4/core/registries.js
 var _a2;
 class $ZodRegistry {
   constructor() {
@@ -10710,7 +10710,7 @@ function registry() {
 }
 (_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
-// node_modules/zod/v4/core/api.js
+// ../parley/node_modules/zod/v4/core/api.js
 function snapshotChecks(def) {
   if (def.checks)
     def.checks = [...def.checks];
@@ -11175,7 +11175,7 @@ function _check(fn, params) {
   ch._zod.check = fn;
   return ch;
 }
-// node_modules/zod/v4/core/to-json-schema.js
+// ../parley/node_modules/zod/v4/core/to-json-schema.js
 function assignProps(target, ...sources) {
   for (const source of sources) {
     for (const key of Reflect.ownKeys(source)) {
@@ -11698,7 +11698,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
   extractDefs(ctx, schema);
   return finalize(ctx, schema);
 };
-// node_modules/zod/v4/core/json-schema-processors.js
+// ../parley/node_modules/zod/v4/core/json-schema-processors.js
 var narrowMin = (agg, key, value) => {
   if (agg[key] === undefined || value > agg[key])
     agg[key] = value;
@@ -12441,7 +12441,7 @@ function toJSONSchema(input, params) {
   extractDefs(ctx, input);
   return finalize(ctx, input);
 }
-// node_modules/zod/v4/classic/errors.js
+// ../parley/node_modules/zod/v4/classic/errors.js
 var _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
 function _lazyMethod(proto, key, make) {
   Object.defineProperty(proto, key, {
@@ -12487,7 +12487,7 @@ var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, undefi
   Parent: Error
 });
 
-// node_modules/zod/v4/classic/parse.js
+// ../parley/node_modules/zod/v4/classic/parse.js
 var parse3 = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse2 = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -12501,7 +12501,7 @@ var safeDecode = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
-// node_modules/zod/v4/classic/schemas.js
+// ../parley/node_modules/zod/v4/classic/schemas.js
 function _ensureDefaultLocale() {
   if (!globalConfig.localeError)
     config(en_default());
@@ -13431,12 +13431,12 @@ function preprocess(fn, schema) {
     out: schema
   });
 }
-// node_modules/zod/v4/classic/iso.js
+// ../parley/node_modules/zod/v4/classic/iso.js
 function datetime2(params) {
   return _isoDateTime(ZodISODateTime, params);
 }
 // src/types.ts
-var VERSION = "0.4.0";
+var VERSION = "0.5.0";
 var LIMITS = {
   name: 60,
   title: 200,
@@ -13452,6 +13452,7 @@ var reason = string2().max(LIMITS.reason);
 var text = string2().min(1).max(LIMITS.text);
 var item = string2().min(1).max(12);
 var side = string2().regex(/^[a-h]$/);
+var att = string2().max(4000).optional();
 var signedBase = {
   session: string2(),
   seq: number2().int().nonnegative(),
@@ -13465,7 +13466,7 @@ var EntrySchema = discriminatedUnion("type", [
     name,
     title,
     items: array(title).min(1).max(LIMITS.itemsAtCall),
-    roster: array(object({ id: side, address: string2(), key: string2().max(100) })).min(3).max(LIMITS.sides).optional()
+    roster: array(object({ id: side, address: string2(), key: string2().max(100), att })).min(3).max(LIMITS.sides).optional()
   }),
   object({ ...signedBase, type: literal("accept"), name }),
   object({ ...signedBase, type: literal("decline"), reason }),
@@ -13483,7 +13484,8 @@ var ControlSchema = object({
   to: string2(),
   at: string2(),
   eph: string2().optional(),
-  group: literal(1).optional()
+  group: literal(1).optional(),
+  att
 });
 var ArgSchemas = {
   call: object({
@@ -13616,7 +13618,7 @@ async function peek(home) {
   }
 }
 
-// node_modules/zod/v3/helpers/util.js
+// ../parley/node_modules/zod/v3/helpers/util.js
 var util;
 (function(util) {
   util.assertEqual = (_) => {};
@@ -13747,7 +13749,7 @@ var getParsedType = (data) => {
   }
 };
 
-// node_modules/zod/v3/ZodError.js
+// ../parley/node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -13876,7 +13878,7 @@ ZodError2.create = (issues) => {
   return error;
 };
 
-// node_modules/zod/v3/locales/en.js
+// ../parley/node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -13979,13 +13981,13 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default2 = errorMap;
 
-// node_modules/zod/v3/errors.js
+// ../parley/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default2;
 function getErrorMap() {
   return overrideErrorMap;
 }
 
-// node_modules/zod/v3/helpers/parseUtil.js
+// ../parley/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -14091,14 +14093,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// node_modules/zod/v3/helpers/errorUtil.js
+// ../parley/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil) {
   errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// node_modules/zod/v3/types.js
+// ../parley/node_modules/zod/v3/types.js
 class ParseInputLazyPath {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -17445,7 +17447,7 @@ var optionalType = ZodOptional2.create;
 var nullableType = ZodNullable2.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
-// node_modules/zod/v4/mini/schemas.js
+// ../parley/node_modules/zod/v4/mini/schemas.js
 var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
   if (!inst._zod)
     throw new Error("Uninitialized schema in ZodMiniType.");
@@ -17508,7 +17510,7 @@ function object2(shape, params) {
   };
   return new ZodMiniObject(def);
 }
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -17669,7 +17671,7 @@ function getLiteralValue(schema) {
   return;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
@@ -18514,12 +18516,12 @@ class UrlElicitationRequiredError extends McpError {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
-// node_modules/zod-to-json-schema/dist/esm/Options.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/Options.js
 var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: undefined,
@@ -18552,7 +18554,7 @@ var getDefaultOptions = (options) => typeof options === "string" ? {
   ...defaultOptions,
   ...options
 };
-// node_modules/zod-to-json-schema/dist/esm/Refs.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/Refs.js
 var getRefs = (options) => {
   const _options = getDefaultOptions(options);
   const currentPath = _options.name !== undefined ? [..._options.basePath, _options.definitionPath, _options.name] : _options.basePath;
@@ -18571,7 +18573,7 @@ var getRefs = (options) => {
     ]))
   };
 };
-// node_modules/zod-to-json-schema/dist/esm/errorMessages.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/errorMessages.js
 function addErrorMessage(res, key, errorMessage, refs) {
   if (!refs?.errorMessages)
     return;
@@ -18586,7 +18588,7 @@ function setResponseValueAndErrors(res, key, value, errorMessage, refs) {
   res[key] = value;
   addErrorMessage(res, key, errorMessage, refs);
 }
-// node_modules/zod-to-json-schema/dist/esm/getRelativePath.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/getRelativePath.js
 var getRelativePath = (pathA, pathB) => {
   let i = 0;
   for (;i < pathA.length && i < pathB.length; i++) {
@@ -18595,7 +18597,7 @@ var getRelativePath = (pathA, pathB) => {
   }
   return [(pathA.length - i).toString(), ...pathB.slice(i)].join("/");
 };
-// node_modules/zod-to-json-schema/dist/esm/parsers/any.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/any.js
 function parseAnyDef(refs) {
   if (refs.target !== "openAi") {
     return {};
@@ -18611,7 +18613,7 @@ function parseAnyDef(refs) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/array.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/array.js
 function parseArrayDef(def, refs) {
   const res = {
     type: "array"
@@ -18635,7 +18637,7 @@ function parseArrayDef(def, refs) {
   return res;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/bigint.js
 function parseBigintDef(def, refs) {
   const res = {
     type: "integer",
@@ -18681,24 +18683,24 @@ function parseBigintDef(def, refs) {
   return res;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/boolean.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/boolean.js
 function parseBooleanDef() {
   return {
     type: "boolean"
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/branded.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/branded.js
 function parseBrandedDef(_def, refs) {
   return parseDef(_def.type._def, refs);
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/catch.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/catch.js
 var parseCatchDef = (def, refs) => {
   return parseDef(def.innerType._def, refs);
 };
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/date.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/date.js
 function parseDateDef(def, refs, overrideDateStrategy) {
   const strategy = overrideDateStrategy ?? refs.dateStrategy;
   if (Array.isArray(strategy)) {
@@ -18743,7 +18745,7 @@ var integerDateParser = (def, refs) => {
   return res;
 };
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/default.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/default.js
 function parseDefaultDef(_def, refs) {
   return {
     ...parseDef(_def.innerType._def, refs),
@@ -18751,12 +18753,12 @@ function parseDefaultDef(_def, refs) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/effects.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/effects.js
 function parseEffectsDef(_def, refs) {
   return refs.effectStrategy === "input" ? parseDef(_def.schema._def, refs) : parseAnyDef(refs);
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/enum.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/enum.js
 function parseEnumDef(def) {
   return {
     type: "string",
@@ -18764,7 +18766,7 @@ function parseEnumDef(def) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js
 var isJsonSchema7AllOfType = (type) => {
   if ("type" in type && type.type === "string")
     return false;
@@ -18806,7 +18808,7 @@ function parseIntersectionDef(def, refs) {
   } : undefined;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/literal.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/literal.js
 function parseLiteralDef(def, refs) {
   const parsedType = typeof def.value;
   if (parsedType !== "bigint" && parsedType !== "number" && parsedType !== "boolean" && parsedType !== "string") {
@@ -18826,7 +18828,7 @@ function parseLiteralDef(def, refs) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/string.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var emojiRegex2 = undefined;
 var zodPatterns = {
   cuid: /^[cC][^\s-]{8,}$/,
@@ -19123,7 +19125,7 @@ function stringifyRegExpWithFlags(regex, refs) {
   return pattern;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/record.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/record.js
 function parseRecordDef(def, refs) {
   if (refs.target === "openAi") {
     console.warn("Warning: OpenAI may not support records in schemas! Try an array of key-value pairs instead.");
@@ -19175,7 +19177,7 @@ function parseRecordDef(def, refs) {
   return schema;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/map.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/map.js
 function parseMapDef(def, refs) {
   if (refs.mapStrategy === "record") {
     return parseRecordDef(def, refs);
@@ -19200,7 +19202,7 @@ function parseMapDef(def, refs) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
 function parseNativeEnumDef(def) {
   const object = def.values;
   const actualKeys = Object.keys(def.values).filter((key) => {
@@ -19214,7 +19216,7 @@ function parseNativeEnumDef(def) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/never.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/never.js
 function parseNeverDef(refs) {
   return refs.target === "openAi" ? undefined : {
     not: parseAnyDef({
@@ -19224,7 +19226,7 @@ function parseNeverDef(refs) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/null.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/null.js
 function parseNullDef(refs) {
   return refs.target === "openApi3" ? {
     enum: ["null"],
@@ -19234,7 +19236,7 @@ function parseNullDef(refs) {
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/union.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/union.js
 var primitiveMappings = {
   ZodString: "string",
   ZodNumber: "number",
@@ -19302,7 +19304,7 @@ var asAnyOf = (def, refs) => {
   return anyOf.length ? { anyOf } : undefined;
 };
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/nullable.js
 function parseNullableDef(def, refs) {
   if (["ZodString", "ZodNumber", "ZodBigInt", "ZodBoolean", "ZodNull"].includes(def.innerType._def.typeName) && (!def.innerType._def.checks || !def.innerType._def.checks.length)) {
     if (refs.target === "openApi3") {
@@ -19334,7 +19336,7 @@ function parseNullableDef(def, refs) {
   return base && { anyOf: [base, { type: "null" }] };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/number.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/number.js
 function parseNumberDef(def, refs) {
   const res = {
     type: "number"
@@ -19383,7 +19385,7 @@ function parseNumberDef(def, refs) {
   return res;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/object.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/object.js
 function parseObjectDef(def, refs) {
   const forceOptionalIntoNullable = refs.target === "openAi";
   const result = {
@@ -19453,7 +19455,7 @@ function safeIsOptional(schema) {
   }
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/optional.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/optional.js
 var parseOptionalDef = (def, refs) => {
   if (refs.currentPath.toString() === refs.propertyPath?.toString()) {
     return parseDef(def.innerType._def, refs);
@@ -19472,7 +19474,7 @@ var parseOptionalDef = (def, refs) => {
   } : parseAnyDef(refs);
 };
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/pipeline.js
 var parsePipelineDef = (def, refs) => {
   if (refs.pipeStrategy === "input") {
     return parseDef(def.in._def, refs);
@@ -19492,12 +19494,12 @@ var parsePipelineDef = (def, refs) => {
   };
 };
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/promise.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/promise.js
 function parsePromiseDef(def, refs) {
   return parseDef(def.type._def, refs);
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/set.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/set.js
 function parseSetDef(def, refs) {
   const items = parseDef(def.valueType._def, {
     ...refs,
@@ -19517,7 +19519,7 @@ function parseSetDef(def, refs) {
   return schema;
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js
 function parseTupleDef(def, refs) {
   if (def.rest) {
     return {
@@ -19545,24 +19547,24 @@ function parseTupleDef(def, refs) {
   }
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/undefined.js
 function parseUndefinedDef(refs) {
   return {
     not: parseAnyDef(refs)
   };
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/unknown.js
 function parseUnknownDef(refs) {
   return parseAnyDef(refs);
 }
 
-// node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parsers/readonly.js
 var parseReadonlyDef = (def, refs) => {
   return parseDef(def.innerType._def, refs);
 };
 
-// node_modules/zod-to-json-schema/dist/esm/selectParser.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/selectParser.js
 var selectParser = (def, typeName, refs) => {
   switch (typeName) {
     case ZodFirstPartyTypeKind.ZodString:
@@ -19640,7 +19642,7 @@ var selectParser = (def, typeName, refs) => {
   }
 };
 
-// node_modules/zod-to-json-schema/dist/esm/parseDef.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/parseDef.js
 function parseDef(def, refs, forceResolution = false) {
   const seenItem = refs.seen.get(def);
   if (refs.override) {
@@ -19695,7 +19697,7 @@ var addMeta = (def, refs, jsonSchema) => {
   }
   return jsonSchema;
 };
-// node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
+// ../parley/node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
 var zodToJsonSchema = (schema, options) => {
   const refs = getRefs(options);
   let definitions = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name, schema]) => ({
@@ -19755,7 +19757,7 @@ var zodToJsonSchema = (schema, options) => {
   }
   return combined;
 };
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function mapMiniTarget(t) {
   if (!t)
     return "draft-7";
@@ -19797,7 +19799,7 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 var DEFAULT_REQUEST_TIMEOUT_MSEC = 60000;
 
 class Protocol {
@@ -20660,7 +20662,7 @@ function mergeCapabilities(base, additional) {
   return result;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 var import_ajv = __toESM(require_ajv(), 1);
 var import_ajv_formats = __toESM(require_dist(), 1);
 function createDefaultAjvInstance() {
@@ -20700,7 +20702,7 @@ class AjvJsonSchemaValidator {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 class ExperimentalServerTasks {
   constructor(_server) {
     this._server = _server;
@@ -20778,7 +20780,7 @@ class ExperimentalServerTasks {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -20813,7 +20815,7 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 class Server extends Protocol {
   constructor(_serverInfo, options) {
     super(options);
@@ -21137,7 +21139,7 @@ class Server extends Protocol {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
 var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
@@ -21151,7 +21153,7 @@ var McpZodTypeKind;
   McpZodTypeKind["Completable"] = "McpCompletable";
 })(McpZodTypeKind || (McpZodTypeKind = {}));
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/toolNameValidation.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/toolNameValidation.js
 var TOOL_NAME_REGEX = /^[A-Za-z0-9._-]{1,128}$/;
 function validateToolName(name) {
   const warnings = [];
@@ -21209,7 +21211,7 @@ function validateAndWarnToolName(name) {
   return result.isValid;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/mcp-server.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/mcp-server.js
 class ExperimentalMcpServerTasks {
   constructor(_mcpServer) {
     this._mcpServer = _mcpServer;
@@ -21224,7 +21226,7 @@ class ExperimentalMcpServerTasks {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js
 function toolInputElementCount(value, max) {
   let count = 0;
   const stack = [value];
@@ -22000,10 +22002,10 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 var STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 
 class ReadBuffer {
@@ -22043,7 +22045,7 @@ function serializeMessage(message) {
 `;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// ../parley/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 class StdioServerTransport {
   constructor(_stdin = process2.stdin, _stdout = process2.stdout, options) {
     this._stdin = _stdin;
@@ -22232,8 +22234,9 @@ var STATE_TEXT = {
   closing: "ending",
   ended: "ended"
 };
-var label = (x) => `${x.name ? `"${x.name}"` : "an unnamed side"} (${x.id}, ${x.address})${x.left ? `, who left: ${x.left}` : ""}`;
-var who = (s) => s.sides ? s.sides.filter((x) => !x.you).map(label).join(", ") : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address})`;
+var verifiedText = (v) => !v ? "not verified" : v.kind === "visitor" ? "visitor · through an invite link" : v.domain ? `verified · ${v.domain}` : "verified";
+var label = (x) => `${x.name ? `"${x.name}"` : "an unnamed side"} (${x.id}, ${x.address}) [${verifiedText(x.verified)}]${x.left ? `, who left: ${x.left}` : ""}`;
+var who = (s) => s.sides ? s.sides.filter((x) => !x.you).map(label).join(", ") : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address}) [${verifiedText(s.peer.verified)}]`;
 var sideName = (s, id) => {
   const x = s.sides?.find((y) => y.id === id);
   return x?.you ? "you" : `${x?.name ?? x?.address ?? "unknown"} (${id})`;
@@ -22276,12 +22279,17 @@ function renderItem(i, s) {
 var renderCall = (s) => !s || s.state === "ended" ? "no call" : `session with ${who(s)}, ${STATE_TEXT[s.state]}`;
 function renderView(v) {
   const lines = [
-    `You are "${v.me.name}" at ${v.me.address}. Relay ${v.relay.connected ? "connected" : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ""}`} (${v.relay.url}).`
+    `You are "${v.me.name}" at ${v.me.address} [${verifiedText(v.me.verified)}]. Relay ${v.relay.connected ? "connected" : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ""}`} (${v.relay.url}).`
   ];
   if (v.viewer)
     lines.push(`Live view for your user: ${v.viewer}`);
-  if (v.cloud) {
-    lines.push(v.cloud.syncing ? `Cloud: this name's sessions are sent to ${v.cloud.url}.` : `Cloud: NOT reaching ${v.cloud.url}: ${v.cloud.error}`);
+  const c = v.cloud;
+  if (c?.link) {
+    lines.push(`This name is not linked to a parley account yet${v.relay.refused ? ", so the relay will not let it on" : ""}. Ask your user to open this link while signed in to ${c.url}; it works for 15 minutes:`, c.link);
+  } else if (v.relay.refused) {
+    lines.push(c?.url ? `The relay needs this name linked to a parley account. Waiting on ${c.url}${c.error ? `: ${c.error}` : ""}.` : "The relay needs this name linked to a parley account. Ask your user for their parley cloud address, then link this name with cloud_link (or `parley cloud link --url <address>`).");
+  } else if (c?.url) {
+    lines.push(c.error ? `Cloud: NOT reaching ${c.url}: ${c.error}` : c.sync ? `Cloud: this name's sessions are sent to ${c.url}.` : `Cloud: linked to ${c.url}, which keeps none of this name's sessions.`);
   }
   const s = v.session;
   if (!s)
@@ -22338,8 +22346,8 @@ function renderMinutes(v, started, ended) {
   const s = v.session;
   if (!s)
     throw new Error("no session to write minutes for");
-  const mine = `${v.me.name} (${v.me.address})`;
-  const theirs = `${s.peer.name} (${s.peer.address})`;
+  const mine = `${v.me.name} (${v.me.address}, ${verifiedText(v.me.verified)})`;
+  const theirs = `${s.peer.name} (${s.peer.address}) [${verifiedText(s.peer.verified)}]`;
   const named = (id) => {
     const x = s.sides?.find((y) => y.id === id);
     return x?.name ?? x?.address;
@@ -22347,7 +22355,7 @@ function renderMinutes(v, started, ended) {
   const by = (p, id) => id ? named(id) : p === "me" ? v.me.name : s.peer.name;
   const of = (state) => s.items.filter((i) => i.state === state);
   const added = (i) => i.addedBy === "call" ? "" : ` (added during the session by ${by(i.addedBy, i.addedById)})`;
-  const all = s.sides?.map((x) => `${x.name ?? "unnamed"} (${x.address})`);
+  const all = s.sides?.map((x) => `${x.name ?? "unnamed"} (${x.address}, ${verifiedText(x.verified)})`);
   const between = all ? `${all.slice(0, -1).join(", ")} and ${all.at(-1)}` : `${mine} and ${theirs}`;
   const leavers = s.sides?.filter((x) => x.left) ?? [];
   const out = [
@@ -22421,6 +22429,8 @@ function setUp(name, relay, approval = process.platform === "darwin" ? "dialog" 
 var INSTRUCTIONS = `Parley connects this session to another person's AI agent for one working session with an agreed agenda.
 
 Names: every Claude Code session has its own parley name, and every name has its own address. A session with no name yet is told so by any tool, with the names this machine already has. The setup tool gives this session a name. Call the other side by its address, or by its name once the two sides have had a session.
+
+Accounts: the hosted relay lets a name on only once it is linked to a parley account, which is done once per name. When status shows a link, give it to your user to open while signed in; do not open it yourself. Each side is shown as "verified · <their email's domain>", "visitor · through an invite link", or "not verified".
 
 How a session goes: one side places a call with an agenda, which is a title and a list of items. A person on the other side accepts or declines it. Agents cannot. Once the session is open, both agents work the items. Each item is its own thread, so several can move at once, and either side can add an item when the work branches. An item closes when one side proposes a resolution and the other agrees to it, or when either side drops it. The session ends when every item is closed or when either side hangs up. Both sides then hold the same minutes.
 
@@ -22518,7 +22528,7 @@ async function runMcp() {
     return `This session is now "${made.name}", a new name. Its address is ${made.address}. Give this address to your user: the other side needs it for the first call, and can call "${made.name}" by name after that.`;
   }));
   server.registerTool("status", {
-    description: "Show this session's parley name and address, the names you can call, whether the relay is connected, and the current session with its agenda."
+    description: "Show this session's parley name and address, the names you can call, whether the relay is connected, the current session with its agenda, and each side's account label. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then."
   }, () => named(async (rpc, me) => {
     const v = forAgent(await rpc("status"));
     const names = callable(me.address).map((n) => `"${n.name}" (${n.address})`);
@@ -22603,13 +22613,13 @@ ${state}`;
     inputSchema: { reason: string2().max(LIMITS.reason) }
   }, (args) => named(async (rpc) => renderView(await rpc("hangup", args))));
   server.registerTool("cloud_link", {
-    description: "Tie this session's parley name to your user's parley cloud account, so they can read its sessions in a browser. Returns a link your user opens while signed in there; it works for 15 minutes. Once they have opened it, every session of this name is sent to that cloud, the other side's words included. Only when your user asks for it.",
+    description: "Tie this session's parley name to your user's parley account. The hosted relay needs this before the name can connect, and it is done once per name. Returns a link your user opens while signed in there; it works for 15 minutes. The account keeps this name's sessions, the other side's words included, only if your user turns that on for the name there. Use it when your user asks, or when status says the relay needs an account and gives no link.",
     inputSchema: {
       url: string2().max(500).optional().describe("The cloud address, if your user gave one")
     }
   }, ({ url }) => named(async (rpc) => {
     const made = await rpc("cloud_link", { url: url ?? process.env.PARLEY_CLOUD });
-    return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes:
+    return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use status afterwards to see that the name is linked:
 ${made.link}`;
   }));
   await server.connect(new StdioServerTransport);
@@ -22964,6 +22974,8 @@ var viewer_default = `<!doctype html>
         new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
       const sideOf = (s, id) => s.sides.find((x) => x.id === id);
+      const verifiedText = (v) =>
+        !v ? 'not verified' : v.kind === 'visitor' ? 'visitor · through an invite link' : v.domain ? 'verified · ' + v.domain : 'verified';
       const nameOf = (x) => (x ? x.savedAs || x.name || x.address : 'Someone');
       const names = (list) =>
         list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
@@ -22984,6 +22996,8 @@ var viewer_default = `<!doctype html>
                   nameOf(caller) + ' is calling',
                   'Waiting for you to accept. ' +
                     caller.address +
+                    ' · ' +
+                    verifiedText(caller.verified) +
                     '. ' +
                     (caller.knownSince
                       ? 'First connected on ' + caller.knownSince.slice(0, 10) + '.'
@@ -23003,6 +23017,7 @@ var viewer_default = `<!doctype html>
         if (!s) return ['', 'No call yet', 'This page updates by itself when your Claude calls or is called.'];
         if (s.sides) return groupHeadline(s);
         const them = s.peer.name ? s.peer.name : s.peer.address;
+        const label = verifiedText(s.peer.verified);
         const known = s.peer.knownSince
           ? 'First connected on ' + s.peer.knownSince.slice(0, 10) + '.'
           : 'This address has not connected here before.';
@@ -23014,13 +23029,13 @@ var viewer_default = `<!doctype html>
           case 'awaiting_approval':
             return s.role === 'caller'
               ? ['wait', 'Waiting for a person to accept', 'Your Claude called ' + s.peer.address + '.']
-              : ['wait', them + ' is calling', 'Waiting for you to accept. ' + s.peer.address + '. ' + known];
+              : ['wait', them + ' is calling', 'Waiting for you to accept. ' + s.peer.address + ' · ' + label + '. ' + known];
           case 'active':
-            return ['live', 'Connected with ' + them, s.peer.address];
+            return ['live', 'Connected with ' + them, s.peer.address + ' · ' + label];
           case 'closing':
             return ['wait', 'Ending…', s.peer.address];
           default:
-            return ['', 'Ended: ' + s.endedReason, them + ' · ' + s.peer.address];
+            return ['', 'Ended: ' + s.endedReason, them + ' · ' + s.peer.address + ' · ' + label];
         }
       }
 
@@ -23036,7 +23051,7 @@ var viewer_default = `<!doctype html>
             head.append(el('span', 'id', x.id), name);
             if (x.you) head.append(el('span', 'chip', 'you'));
             if (x.left) head.append(el('span', 'chip dropped', 'left'));
-            row.append(head);
+            row.append(head, el('div', 'votes', verifiedText(x.verified)));
             if (x.left) row.append(el('div', 'outcome', x.left));
             return row;
           }),
@@ -23120,6 +23135,7 @@ var viewer_default = `<!doctype html>
         $('me').replaceChildren(
           document.createTextNode(view.me.name + ' · '),
           el('code', '', view.me.address),
+          document.createTextNode(' · ' + verifiedText(view.me.verified)),
           document.createTextNode(view.relay.connected ? ' · relay connected' : ' · relay NOT connected'),
         );
         const [dot, title, detail] = headline(view);
@@ -23170,6 +23186,35 @@ var viewer_default = `<!doctype html>
 </html>
 `;
 
+// src/attest.ts
+var SIGNED_AS = `parley-attest
+`;
+var signedBy = (issuer, body, sig) => {
+  try {
+    return verifyText(issuer, SIGNED_AS + body, sig);
+  } catch {
+    return false;
+  }
+};
+function readAttestation(token, issuers, key, now = Date.now()) {
+  const [head, sig, extra] = token.split(".");
+  if (!head || !sig || extra !== undefined)
+    throw new Error("the account proof is malformed");
+  const body = Buffer.from(head, "base64url").toString();
+  if (!issuers.some((issuer) => signedBy(issuer, body, sig))) {
+    throw new Error("the account proof is not from a known parley cloud");
+  }
+  const a = JSON.parse(body);
+  if (a.v !== 1)
+    throw new Error("the account proof is of an unknown version");
+  if (a.key !== key || a.address !== addressOf(key)) {
+    throw new Error("the account proof is for another key");
+  }
+  if (a.exp * 1000 <= now)
+    throw new Error("the account proof has expired");
+  return a;
+}
+
 // src/cloud.ts
 import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync5, readFileSync as readFileSync3, readdirSync as readdirSync3, rmSync } from "node:fs";
@@ -23177,6 +23222,9 @@ import { join as join6 } from "node:path";
 var RETRY_MS = [2000, 5000, 15000, 60000];
 var HEARTBEAT_MS = 30000;
 var BATCH_BYTES = 200000;
+var RENEW_LEFT_MS = 18 * 3600000;
+var CHECK_MS = 10 * 60000;
+var UNLINKED_CHECK_MS = 30000;
 var originOf = (url) => {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
@@ -23195,28 +23243,100 @@ function minutesOf(dir) {
   const path = join6(dir, "minutes.md");
   return existsSync5(path) ? readFileSync3(path, "utf8") : undefined;
 }
-function startCloud(home, me, log, live) {
-  let url = existsSync5(join6(home, "cloud.json")) ? readJson2(home, "cloud.json").url : undefined;
+function startCloud(home, me, log, live, renewed) {
+  const own = (f) => readAttestation(f.att, [f.issuer], me.publicKey, 0);
+  let attest = existsSync5(join6(home, "attest.json")) ? readJson2(home, "attest.json") : undefined;
+  if (attest)
+    own(attest);
+  const saved = existsSync5(join6(home, "cloud.json")) ? readJson2(home, "cloud.json").url : undefined;
+  let url = saved === null ? undefined : saved ?? (attest ? undefined : process.env.PARLEY_CLOUD);
+  if (url && saved === undefined) {
+    url = originOf(url);
+    writeJson(home, "cloud.json", { url });
+  }
+  let refusal;
+  let attestError;
+  let checking;
+  let lastCheck = 0;
   let have;
   let error;
   let dirty = false;
   let running = false;
   let failures = 0;
   let timer;
-  async function post(calls) {
-    const body = JSON.stringify({ name: me.name, calls });
+  const headers = (kind, body) => {
     const time = new Date().toISOString();
     const digest = createHash2("sha256").update(body).digest("hex");
-    const res = await fetch(`${url}/api/ingest`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-parley-key": me.publicKey,
-        "x-parley-time": time,
-        "x-parley-sig": signText(me, `parley-cloud-ingest
+    return {
+      "content-type": "application/json",
+      "x-parley-key": me.publicKey,
+      "x-parley-time": time,
+      "x-parley-sig": signText(me, `parley-cloud-${kind}
 ${time}
 ${digest}`)
-      },
+    };
+  };
+  const keeping = () => Boolean(url && attest?.sync && !refusal);
+  async function fetchAttest() {
+    const body = JSON.stringify({ name: me.name });
+    const res = await fetch(`${url}/api/attest`, {
+      method: "POST",
+      headers: headers("attest", body),
+      body,
+      signal: AbortSignal.timeout(15000)
+    });
+    const reply = await res.json().catch(() => ({}));
+    if (res.status === 403 && (reply.error === "not linked" || reply.error === "banned")) {
+      if (refusal !== reply.error)
+        log(`the cloud says this name is ${reply.error}`);
+      refusal = reply.error;
+      return;
+    }
+    if (!res.ok || typeof reply.att !== "string" || typeof reply.issuer !== "string" || typeof reply.sync !== "boolean") {
+      throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    }
+    readAttestation(reply.att, [reply.issuer], me.publicKey);
+    refusal = undefined;
+    const keep = attest?.issuer === reply.issuer && own(attest).exp * 1000 - Date.now() >= RENEW_LEFT_MS;
+    const wasKeeping = keeping();
+    attest = {
+      att: keep && attest ? attest.att : reply.att,
+      issuer: reply.issuer,
+      sync: reply.sync,
+      fetchedAt: new Date().toISOString()
+    };
+    writeJson(home, "attest.json", attest, true);
+    if (!keep)
+      renewed(attest.att);
+    if (keeping() && !wasKeeping)
+      touch();
+  }
+  function check() {
+    if (!url)
+      return Promise.resolve();
+    checking ??= fetchAttest().then(() => {
+      attestError = undefined;
+    }, (err) => {
+      const why = err instanceof Error ? err.message : String(err);
+      if (why !== attestError)
+        log("could not get the account proof:", why);
+      attestError = why;
+    }).finally(() => {
+      checking = undefined;
+      lastCheck = Date.now();
+    });
+    return checking;
+  }
+  setInterval(() => {
+    const due = !attest || refusal || attestError ? UNLINKED_CHECK_MS : CHECK_MS;
+    if (url && Date.now() - lastCheck >= due)
+      check();
+  }, 5000).unref();
+  async function post(calls) {
+    const body = JSON.stringify({ name: me.name, calls });
+    const res = await fetch(`${url}/api/ingest`, {
+      method: "POST",
+      headers: headers("ingest", body),
       body,
       signal: AbortSignal.timeout(15000)
     });
@@ -23279,11 +23399,11 @@ ${digest}`)
     }, linesOf(now.dir), known);
   }
   async function run() {
-    if (running || !url)
+    if (running || !keeping())
       return;
     running = true;
     try {
-      while (dirty && url) {
+      while (dirty && keeping()) {
         dirty = false;
         await sync();
         if (error)
@@ -23293,10 +23413,17 @@ ${digest}`)
       }
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
+      have = undefined;
+      if (why === "not kept" && attest) {
+        log("the cloud no longer keeps this name's sessions");
+        attest = { ...attest, sync: false };
+        writeJson(home, "attest.json", attest, true);
+        error = undefined;
+        return;
+      }
       if (why !== error)
         log("cloud sync failed:", why);
       error = why;
-      have = undefined;
       dirty = true;
       clearTimeout(timer);
       timer = setTimeout(run, RETRY_MS[Math.min(failures++, RETRY_MS.length - 1)]);
@@ -23305,7 +23432,7 @@ ${digest}`)
     }
   }
   function touch() {
-    if (!url)
+    if (!keeping())
       return;
     dirty = true;
     clearTimeout(timer);
@@ -23316,35 +23443,67 @@ ${digest}`)
     if (now && now.state !== "ended")
       touch();
   }, HEARTBEAT_MS).unref();
-  touch();
+  function linkTo(to) {
+    const t = new Date().toISOString();
+    const query = new URLSearchParams({
+      key: me.publicKey,
+      name: me.name,
+      t,
+      sig: signText(me, `parley-cloud-link
+${to}
+${t}
+${me.name}`)
+    });
+    return `${to}/link?${query}`;
+  }
+  check();
   return {
     touch,
-    state: () => url ? { url, syncing: !error, error } : undefined,
+    check,
+    recheck: () => Date.now() - lastCheck < 2000 ? Promise.resolve() : check(),
+    att: () => attest?.att,
+    issuers: () => attest ? [attest.issuer] : [],
+    verified: () => {
+      if (!attest)
+        return;
+      const a = own(attest);
+      return { domain: a.domain, kind: a.kind };
+    },
+    state: () => {
+      if (!url && !attest)
+        return;
+      const sync = Boolean(attest?.sync) && !refusal;
+      return {
+        url,
+        link: url && refusal === "not linked" ? linkTo(url) : undefined,
+        sync,
+        syncing: sync && !error,
+        error: refusal === "banned" ? "the account this name is linked to is banned" : refusal === "not linked" ? "this name is not linked to an account yet" : attestError ?? error
+      };
+    },
     link(to) {
       const given = to ?? url ?? process.env.PARLEY_CLOUD;
       if (!given)
         throw new Error("no cloud address is known; give one, like https://cloud.example.com");
-      url = originOf(given);
-      writeJson(home, "cloud.json", { url });
+      const next = originOf(given);
+      if (next !== url) {
+        url = next;
+        refusal = undefined;
+        writeJson(home, "cloud.json", { url });
+      }
       have = undefined;
       error = undefined;
-      touch();
-      const t = new Date().toISOString();
-      const query = new URLSearchParams({
-        key: me.publicKey,
-        name: me.name,
-        t,
-        sig: signText(me, `parley-cloud-link
-${url}
-${t}
-${me.name}`)
-      });
-      return { url, link: `${url}/link?${query}` };
+      check();
+      return { url: next, link: linkTo(next) };
     },
     unlink() {
-      rmSync(join6(home, "cloud.json"), { force: true });
+      writeJson(home, "cloud.json", { url: null });
+      rmSync(join6(home, "attest.json"), { force: true });
       clearTimeout(timer);
       url = undefined;
+      attest = undefined;
+      refusal = undefined;
+      attestError = undefined;
       have = undefined;
       error = undefined;
     }
@@ -23362,6 +23521,8 @@ function openInBrowser(url, onError) {
 
 // src/relay.ts
 var RELAY_AUTH = "parley relay auth ";
+var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
+var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/node.ts
 var RING_MS = 5 * 60000;
@@ -23376,6 +23537,8 @@ var CONNECT_WAIT_MS = 15000;
 var QUIET_SHOWN = 3;
 var QUIET_ENDS = 6;
 var ALIVE_MISSES = 3;
+var RING_WINDOW_MS = 10 * 60000;
+var TOO_MANY_RINGS = "too many calls from this address; try again later";
 var LETTERS = "abcdefgh";
 
 class ProtocolError extends Error {
@@ -23431,7 +23594,10 @@ async function runNode(home) {
   let socket;
   let relayReady = false;
   let relayError;
+  let relayRefused = false;
   let retryMs = 2000;
+  let retryTimer;
+  const rings = new Map;
   let socketSince = 0;
   let probe;
   let probeCounter = 0;
@@ -23459,7 +23625,25 @@ async function runNode(home) {
       title: s.title,
       endedReason: s.state === "ended" ? s.endReason : undefined
     };
+  }, (att) => {
+    if (socket && relayReady)
+      socket.send(JSON.stringify({ t: "renew", att }));
+    else if (!socket && relayRefused) {
+      clearTimeout(retryTimer);
+      connectRelay();
+    }
   });
+  function verify(att, key, who) {
+    if (att === undefined)
+      return;
+    try {
+      const a = readAttestation(att, cloud.issuers(), key);
+      return { domain: a.domain, kind: a.kind };
+    } catch (err) {
+      log(`the account proof from ${who} does not check out:`, explain(err));
+      return;
+    }
+  }
   function emit(ev) {
     cloud.touch();
     events.push({ ...ev, n: ++counter });
@@ -23486,9 +23670,12 @@ async function runNode(home) {
       socket = undefined;
       relayReady = false;
       relayError = ev.reason || "cannot reach it";
+      relayRefused = ev.code === 4003;
       relayAnswered();
       log(`relay connection closed (${ev.code} ${ev.reason}); retrying`);
-      setTimeout(connectRelay, retryMs);
+      if (relayRefused)
+        cloud.check();
+      retryTimer = setTimeout(connectRelay, retryMs);
       retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
     };
     ws.onerror = () => {};
@@ -23530,11 +23717,13 @@ async function runNode(home) {
       socket?.send(JSON.stringify({
         t: "hello",
         publicKey: me.publicKey,
-        sig: signText(me, RELAY_AUTH + msg.nonce)
+        sig: signText(me, RELAY_AUTH + msg.nonce),
+        att: cloud.att()
       }));
     } else if (msg.t === "ready") {
       relayReady = true;
       relayError = undefined;
+      relayRefused = false;
       if (current && current.state !== "ended") {
         for (const leg of current.legs)
           leg.lastHeard = Date.now();
@@ -23572,7 +23761,8 @@ async function runNode(home) {
       to,
       at: new Date().toISOString(),
       eph,
-      group: group ? 1 : undefined
+      group: group ? 1 : undefined,
+      att: kind === "busy" ? undefined : cloud.att()
     });
     relaySend(to, { signed, sig: signText(me, signed), key: me.publicKey }, `${kind}:${session}`);
   }
@@ -23727,6 +23917,9 @@ async function runNode(home) {
         emit({ kind: "impostor", address: from });
         return;
       }
+      const now = Date.now();
+      const recent = [...(rings.get(from) ?? []).filter((t) => now - t < RING_WINDOW_MS), now];
+      rings.set(from, recent);
       if (s && s.state !== "ended") {
         sendControl(from, "busy", c.session);
         return;
@@ -23734,7 +23927,11 @@ async function runNode(home) {
       const next = startSession(c.session, "callee", [from]);
       const leg = next.legs[0];
       next.group = c.group === 1;
+      if (recent.length > (config.limits.ringsPerTenMinutes ?? 3))
+        next.declineWith = TOO_MANY_RINGS;
       leg.side.publicKey = key;
+      leg.side.att = c.att;
+      leg.side.verified = verify(c.att, key, from);
       leg.keys = deriveSessionKeys(leg.eph, c.eph, next.id, "callee");
       next.state = "ringing";
       writeHeader(next);
@@ -23754,6 +23951,8 @@ async function runNode(home) {
     if (!c.eph)
       return;
     leg.side.publicKey = key;
+    leg.side.att = c.att;
+    leg.side.verified = verify(c.att, key, from);
     leg.keys = deriveSessionKeys(leg.eph, c.eph, s.id, "caller");
     leg.group = c.group === 1;
     if (s.group && !leg.group) {
@@ -23772,8 +23971,8 @@ async function runNode(home) {
       title: s.title,
       items: s.items.map((i) => i.title),
       roster: s.group ? [
-        { id: "a", address, key: me.publicKey },
-        ...s.sides.map((x) => ({ id: x.id, address: x.address, key: x.publicKey ?? "" }))
+        { id: "a", address, key: me.publicKey, att: cloud.att() },
+        ...s.sides.map((x) => ({ id: x.id, address: x.address, key: x.publicKey ?? "", att: x.att }))
       ] : undefined
     });
   }
@@ -23862,11 +24061,13 @@ async function runNode(home) {
     const mine = { address, publicKey: me.publicKey };
     const peer = peerOf(s);
     const theirs = { address: peer.address, publicKey: peer.publicKey };
+    const [callerAtt, calleeAtt] = s.role === "caller" ? [cloud.att(), peer.att] : [peer.att, cloud.att()];
     record(s, JSON.stringify({
       session: s.id,
       caller: s.role === "caller" ? mine : theirs,
       callee: s.role === "caller" ? theirs : mine,
-      sides: s.group && s.role === "caller" ? s.sides.map((x) => ({ id: x.id, address: x.address, publicKey: x.publicKey })) : undefined
+      attest: { caller: callerAtt, callee: calleeAtt },
+      sides: s.group && s.role === "caller" ? s.sides.map((x) => ({ id: x.id, address: x.address, publicKey: x.publicKey, att: x.att })) : undefined
     }));
   }
   function record(s, raw, sig) {
@@ -23934,6 +24135,8 @@ async function runNode(home) {
         publicKey: r.key,
         knownSince: contacts[r.address]?.firstSeen,
         savedAs: contacts[r.address]?.name,
+        att: r.att,
+        verified: verify(r.att, r.key, r.address),
         nextSeq: 0
       }))
     ];
@@ -24016,6 +24219,10 @@ async function runNode(home) {
         s.state = "awaiting_approval";
         if (by === "peer") {
           peerOf(s).name = e.name;
+          if (s.declineWith) {
+            log(`declined a call from ${peerOf(s).address}: ${s.declineWith}`);
+            return decide(s, false, s.declineWith);
+          }
           s.answerIn = config.approval;
           emit({ kind: "incoming" });
           promptForApproval(s);
@@ -24159,11 +24366,12 @@ async function runNode(home) {
     const peer = peerOf(s);
     const text = [
       `${clean(peer.name ?? "Someone")} is calling "${clean(me.name)}", one of your Claude Code sessions.`,
+      `Account: ${verifiedText(peer.verified)}`,
       `Address: ${peer.address}`,
       peer.knownSince ? `You first connected to this address on ${peer.knownSince.slice(0, 10)}.` : "You have NOT connected to this address before.",
       ...s.group ? [
         "Also called into this session:",
-        ...s.sides.slice(1).map((x) => `  • ${x.savedAs ? clean(x.savedAs) : "someone you have not connected to"} (${x.address})`)
+        ...s.sides.slice(1).map((x) => `  • ${x.savedAs ? clean(x.savedAs) : "someone you have not connected to"} (${x.address}, ${verifiedText(x.verified)})`)
       ] : [],
       "",
       `Agenda: ${clean(s.title)}`,
@@ -24214,8 +24422,13 @@ async function runNode(home) {
       cursor: counter,
       approval: s?.answerIn ?? config.approval,
       viewer: viewerUrl,
-      me: { name: me.name, address },
-      relay: { url: relayUrl, connected: relayReady, error: relayError },
+      me: { name: me.name, address, verified: cloud.verified() },
+      relay: {
+        url: relayUrl,
+        connected: relayReady,
+        error: relayError,
+        refused: relayRefused && !relayReady ? true : undefined
+      },
       cloud: cloud.state(),
       session: s && {
         id: s.id,
@@ -24225,14 +24438,16 @@ async function runNode(home) {
           address: peerOf(s).address,
           name: peerOf(s).name,
           knownSince: peerOf(s).knownSince,
-          savedAs: peerOf(s).savedAs
+          savedAs: peerOf(s).savedAs,
+          verified: peerOf(s).verified
         },
         sides: s.group ? [
-          { id: s.self, name: me.name, address, you: true },
+          { id: s.self, name: me.name, address, you: true, verified: cloud.verified() },
           ...s.sides.map((x) => ({
             id: x.id,
             name: x.name,
             address: x.address,
+            verified: x.verified,
             knownSince: x.knownSince,
             savedAs: x.savedAs,
             left: s.left.get(x.id),
@@ -24296,6 +24511,9 @@ async function runNode(home) {
         relayFirstAnswer,
         new Promise((resolve) => setTimeout(resolve, 3000))
       ]);
+      if (relayRefused || cloud.state()?.link) {
+        await Promise.race([cloud.recheck(), new Promise((resolve) => setTimeout(resolve, 3000))]);
+      }
       return view();
     },
     call: (args) => {
@@ -24601,22 +24819,76 @@ var HELLO_MS = 1e4;
 var MAX_CONNECTIONS = 500;
 var WINDOW_MS = 1e4;
 var MAX_PER_WINDOW = 300;
+var MAX_BYTES_PER_WINDOW2 = 4 * 1024 * 1024;
+var MAX_PER_IP = 20;
+var MAX_PER_ACCOUNT = 50;
+var NEEDS_ACCOUNT = "this relay needs a parley account: update parley and link this name";
 var log2 = (...parts) => console.log(new Date().toISOString(), ...parts);
-function startRelay(port, hostname) {
+var LOOPBACK2 = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+var bump = (counts, key, by) => {
+  const n = (counts.get(key) ?? 0) + by;
+  if (n > 0)
+    counts.set(key, n);
+  else
+    counts.delete(key);
+};
+function startRelay(port, hostname, opts = {}) {
+  const issuers = opts.issuers ?? [];
+  const accounts = issuers.length > 0;
   const online = new Map;
+  const perIp = new Map;
+  const perSub = new Map;
   let connections = 0;
+  function admit(ws, att, publicKey) {
+    if (!accounts)
+      return true;
+    if (typeof att !== "string" || !att) {
+      ws.close(4003, NEEDS_ACCOUNT);
+      return false;
+    }
+    let proof;
+    try {
+      proof = readAttestation(att, issuers, publicKey);
+    } catch (err) {
+      ws.close(4003, err instanceof Error ? err.message : String(err));
+      return false;
+    }
+    if (ws.data.sub === undefined) {
+      if ((perSub.get(proof.sub) ?? 0) >= MAX_PER_ACCOUNT) {
+        ws.close(4029, "too many connections for this account");
+        return false;
+      }
+      ws.data.sub = proof.sub;
+      bump(perSub, proof.sub, 1);
+    } else if (ws.data.sub !== proof.sub) {
+      ws.close(4003, "the account proof is for another account");
+      return false;
+    }
+    clearTimeout(ws.data.expiryTimer);
+    ws.data.expiryTimer = setTimeout(() => ws.close(4003, "the account proof has expired"), proof.exp * 1000 - Date.now());
+    return true;
+  }
   function hello(ws, msg) {
     if (msg.t !== "hello" || typeof msg.publicKey !== "string" || typeof msg.sig !== "string" || !verifyText(msg.publicKey, RELAY_AUTH2 + ws.data.nonce, msg.sig)) {
       ws.close(4001, "bad hello");
       return;
     }
+    if (!admit(ws, msg.att, msg.publicKey))
+      return;
     const address = addressOf(msg.publicKey);
     clearTimeout(ws.data.helloTimer);
     online.get(address)?.close(4002, "replaced by a newer connection");
     online.set(address, ws);
     ws.data.address = address;
+    ws.data.publicKey = msg.publicKey;
     log2("online", address);
     ws.send(JSON.stringify({ t: "ready", address }));
+  }
+  function clientIp(req, peer) {
+    if (!LOOPBACK2.has(peer))
+      return peer;
+    const hops = req.headers.get("x-forwarded-for")?.split(",");
+    return hops?.[hops.length - 1]?.trim() || peer;
   }
   return Bun.serve({
     port,
@@ -24626,10 +24898,16 @@ function startRelay(port, hostname) {
         return new Response(`relay is full
 `, { status: 503 });
       }
+      const peer = server.requestIP(req)?.address;
+      if (!peer)
+        return new Response(`no peer address
+`, { status: 400 });
       const data = {
         nonce: randomBytes2(24).toString("base64url"),
+        ip: clientIp(req, peer),
         windowStart: Date.now(),
-        count: 0
+        count: 0,
+        bytes: 0
       };
       if (server.upgrade(req, { data }))
         return;
@@ -24641,6 +24919,14 @@ function startRelay(port, hostname) {
       maxPayloadLength: 256 * 1024,
       open(ws) {
         connections++;
+        if (accounts) {
+          if ((perIp.get(ws.data.ip) ?? 0) >= MAX_PER_IP) {
+            ws.close(4029, "too many connections from this address");
+            return;
+          }
+          ws.data.ipCounted = true;
+          bump(perIp, ws.data.ip, 1);
+        }
         ws.data.helloTimer = setTimeout(() => ws.close(4001, "no hello"), HELLO_MS);
         ws.send(JSON.stringify({ t: "challenge", nonce: ws.data.nonce }));
       },
@@ -24649,6 +24935,12 @@ function startRelay(port, hostname) {
         if (now - ws.data.windowStart > WINDOW_MS) {
           ws.data.windowStart = now;
           ws.data.count = 0;
+          ws.data.bytes = 0;
+        }
+        ws.data.bytes += typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength;
+        if (ws.data.bytes > MAX_BYTES_PER_WINDOW2) {
+          ws.close(4029, "too much data");
+          return;
         }
         if (++ws.data.count > MAX_PER_WINDOW) {
           ws.close(4008, "too many messages");
@@ -24661,6 +24953,10 @@ function startRelay(port, hostname) {
             return hello(ws, msg);
         } catch {
           ws.close(4000, "malformed message");
+          return;
+        }
+        if (msg.t === "renew") {
+          admit(ws, msg.att, ws.data.publicKey);
           return;
         }
         if (msg.t !== "send" || typeof msg.to !== "string")
@@ -24679,6 +24975,11 @@ function startRelay(port, hostname) {
       close(ws) {
         connections--;
         clearTimeout(ws.data.helloTimer);
+        clearTimeout(ws.data.expiryTimer);
+        if (ws.data.ipCounted)
+          bump(perIp, ws.data.ip, -1);
+        if (ws.data.sub !== undefined)
+          bump(perSub, ws.data.sub, -1);
         const { address } = ws.data;
         if (address && online.get(address) === ws) {
           online.delete(address);
@@ -24698,8 +24999,9 @@ var STATE_TEXT2 = {
   closing: "ending",
   ended: "ended"
 };
-var label2 = (x) => `${x.name ? `"${x.name}"` : "an unnamed side"} (${x.id}, ${x.address})${x.left ? `, who left: ${x.left}` : ""}`;
-var who2 = (s) => s.sides ? s.sides.filter((x) => !x.you).map(label2).join(", ") : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address})`;
+var verifiedText2 = (v) => !v ? "not verified" : v.kind === "visitor" ? "visitor · through an invite link" : v.domain ? `verified · ${v.domain}` : "verified";
+var label2 = (x) => `${x.name ? `"${x.name}"` : "an unnamed side"} (${x.id}, ${x.address}) [${verifiedText2(x.verified)}]${x.left ? `, who left: ${x.left}` : ""}`;
+var who2 = (s) => s.sides ? s.sides.filter((x) => !x.you).map(label2).join(", ") : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address}) [${verifiedText2(s.peer.verified)}]`;
 var sideName2 = (s, id) => {
   const x = s.sides?.find((y) => y.id === id);
   return x?.you ? "you" : `${x?.name ?? x?.address ?? "unknown"} (${id})`;
@@ -24741,12 +25043,17 @@ function renderItem2(i, s) {
 }
 function renderView2(v) {
   const lines = [
-    `You are "${v.me.name}" at ${v.me.address}. Relay ${v.relay.connected ? "connected" : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ""}`} (${v.relay.url}).`
+    `You are "${v.me.name}" at ${v.me.address} [${verifiedText2(v.me.verified)}]. Relay ${v.relay.connected ? "connected" : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ""}`} (${v.relay.url}).`
   ];
   if (v.viewer)
     lines.push(`Live view for your user: ${v.viewer}`);
-  if (v.cloud) {
-    lines.push(v.cloud.syncing ? `Cloud: this name's sessions are sent to ${v.cloud.url}.` : `Cloud: NOT reaching ${v.cloud.url}: ${v.cloud.error}`);
+  const c = v.cloud;
+  if (c?.link) {
+    lines.push(`This name is not linked to a parley account yet${v.relay.refused ? ", so the relay will not let it on" : ""}. Ask your user to open this link while signed in to ${c.url}; it works for 15 minutes:`, c.link);
+  } else if (v.relay.refused) {
+    lines.push(c?.url ? `The relay needs this name linked to a parley account. Waiting on ${c.url}${c.error ? `: ${c.error}` : ""}.` : "The relay needs this name linked to a parley account. Ask your user for their parley cloud address, then link this name with cloud_link (or `parley cloud link --url <address>`).");
+  } else if (c?.url) {
+    lines.push(c.error ? `Cloud: NOT reaching ${c.url}: ${c.error}` : c.sync ? `Cloud: this name's sessions are sent to ${c.url}.` : `Cloud: linked to ${c.url}, which keeps none of this name's sessions.`);
   }
   const s = v.session;
   if (!s)
@@ -24817,17 +25124,18 @@ var USAGE = `parley: a working session between two AI agents
   parley hangup [reason]    end the current session
   parley minutes            print the minutes of the last session
   parley stop               stop the background nodes
-  parley cloud link [--url <https url>]   print a link that ties this name to your cloud account
-  parley cloud off          stop sending this name's sessions to the cloud
+  parley cloud link [--url <https url>]   print a link that ties this name to your parley account
+  parley cloud off          unlink this name from the cloud
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
-  parley relay [--port 8787] [--host 0.0.0.0]
+  parley relay [--port 8787] [--host 0.0.0.0] [--issuer <key>]...
+                            --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof
   parley daemon             run a name's node in the foreground`;
 var [command, ...rest] = process.argv.slice(2);
-var VALUE_FLAGS = ["--name", "--relay", "--approval", "--as", "--home", "--port", "--host", "--url"];
+var VALUE_FLAGS = ["--name", "--relay", "--approval", "--as", "--home", "--port", "--host", "--url", "--issuer"];
 function flag(name) {
   const at = rest.indexOf(name);
   if (at < 0)
@@ -24981,7 +25289,18 @@ ${made.link}`);
       if (typeof Bun === "undefined") {
         throw new Error("the relay runs on Bun: use the parley binary, or `bun src/cli.ts relay`");
       }
-      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0");
+      const issuers = [
+        ...rest.flatMap((w, i) => {
+          if (w !== "--issuer")
+            return [];
+          const key = rest[i + 1];
+          if (!key)
+            throw new Error("--issuer needs a value");
+          return [key];
+        }),
+        ...(process.env.PARLEY_RELAY_ISSUERS ?? "").split(",").map((k) => k.trim()).filter(Boolean)
+      ];
+      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0", { issuers });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

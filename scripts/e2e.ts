@@ -19,11 +19,12 @@ import {
   verifyText,
   type Identity,
 } from '../src/crypto';
-import { makeAttestation } from '../src/attest';
+import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Config, type Contact } from '../src/home';
 import { request, type NodeInfo } from '../src/ipc';
 import { RELAY_AUTH, startRelay } from '../src/relay';
 import { VERSION, type Ev, type View, type WaitResult } from '../src/types';
+import type { AttestFile } from '../src/cloud';
 
 // PARLEY_E2E_CLI="node /abs/bin/parley.mjs" runs the same checks against
 // the bundle the plugin ships.
@@ -54,9 +55,15 @@ class Peer {
   ) {
     this.root = join(base, name.toLowerCase().replace(/ /g, '-'));
   }
+  // These peers ring each other far more often than a person would; only
+  // the ring-limit check runs with the limit that ships.
+  shippedRingLimit = false;
   init() {
     const [, address = ''] = this.cli('init', '--name', this.name, '--relay', relayUrl, '--approval', this.approval).trim().split('\n');
     this.home = join(this.root, 'ids', address);
+    if (this.shippedRingLimit) return;
+    const config = readJson<Config>(this.home, 'config.json');
+    writeJson(this.home, 'config.json', { ...config, limits: { ...config.limits, ringsPerTenMinutes: 1000 } });
   }
   // Starting the node through the CLI makes it run on the runtime under test.
   start() {
@@ -517,8 +524,73 @@ async function whoAccepts() {
   await over();
 }
 
-// A stand-in for the cloud: it checks what a real one must check and keeps
-// what it is sent.
+type Account = { sub: string; domain: string | null; sync: boolean; banned?: boolean; lifetime?: number };
+type Ingest = { key: string; signed: boolean; body: { name: string; calls: { session: string; from: number; lines: { raw: string; sig?: string }[]; state?: string; minutes?: string }[] } };
+
+const cloudIssuer = newIdentity('Test cloud');
+const unix = () => Math.floor(Date.now() / 1000);
+
+// A stand-in for the cloud: it checks what a real one must check, gives the
+// accounts it is told about their proofs, and keeps what it is sent.
+function startCloudStub() {
+  const accounts = new Map<string, Account>();
+  const asked: string[] = [];
+  const got: Ingest[] = [];
+  const lines = new Map<string, number>();
+  let hold: Promise<void> | undefined;
+  const server = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    async fetch(req) {
+      const path = new URL(req.url).pathname;
+      const text = await req.text();
+      const [key, time, sig] = ['x-parley-key', 'x-parley-time', 'x-parley-sig'].map((h) => req.headers.get(h) ?? '');
+      const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');
+      const kind = path === '/api/attest' ? 'attest' : 'ingest';
+      const signed = verifyText(key ?? '', `parley-cloud-${kind}\n${time}\n${digest}`, sig ?? '');
+      const body = JSON.parse(text);
+      const account = signed ? accounts.get(key ?? '') : undefined;
+      if (kind === 'attest') {
+        asked.push(key ?? '');
+        await hold;
+        if (!account) return Response.json({ error: 'not linked' }, { status: 403 });
+        if (account.banned) return Response.json({ error: 'banned' }, { status: 403 });
+        const iat = unix();
+        const att = makeAttestation(cloudIssuer, { key: key ?? '', sub: account.sub, domain: account.domain, kind: 'account', iat, exp: iat + (account.lifetime ?? 86400) });
+        return Response.json({ att, issuer: cloudIssuer.publicKey, sync: account.sync });
+      }
+      got.push({ key: key ?? '', signed, body });
+      if (!account) return Response.json({ error: 'this name is not linked to an account yet' }, { status: 403 });
+      if (!account.sync) return Response.json({ error: 'not kept' }, { status: 403 });
+      for (const c of body.calls) lines.set(c.session, Math.max(lines.get(c.session) ?? 0, c.from + c.lines.length));
+      return Response.json({ have: Object.fromEntries([...lines].map(([s, n]) => [s, { lines: n, minutes: true }])) });
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${server.port}`,
+    accounts,
+    asked,
+    got,
+    lines,
+    // Holds every proof request until the returned function is called.
+    hold() {
+      let release = () => {};
+      hold = new Promise<void>((resolve) => (release = resolve));
+      return () => {
+        hold = undefined;
+        release();
+      };
+    },
+    stop: () => server.stop(true),
+  };
+}
+
+function headOf(p: Peer, sessionId: string) {
+  const dirs = [...new Bun.Glob(`*-${sessionId}/transcript.jsonl`).scanSync(join(p.home, 'sessions'))];
+  const first = readFileSync(join(p.home, 'sessions', dirs[0] ?? ''), 'utf8').split('\n')[0] ?? '';
+  return JSON.parse(JSON.parse(first).raw);
+}
+
 async function cloud() {
   console.log('\n# sending sessions to a cloud account');
   const [frank, grace] = [new Peer('Frank'), new Peer('Grace')];
@@ -526,24 +598,9 @@ async function cloud() {
   for (const p of [frank, grace]) p.init();
   for (const p of [frank, grace]) p.start();
   for (const p of [frank, grace]) await connected(p);
-  const got: { key: string; signed: boolean; body: { name: string; calls: { session: string; from: number; lines: { raw: string; sig?: string }[]; state?: string; minutes?: string }[] } }[] = [];
-  let linked = false;
-  const lines = new Map<string, number>();
-  const stub = Bun.serve({
-    port: 0,
-    hostname: '127.0.0.1',
-    async fetch(req) {
-      const text = await req.text();
-      const [key, time, sig] = ['x-parley-key', 'x-parley-time', 'x-parley-sig'].map((h) => req.headers.get(h) ?? '');
-      const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');
-      const body = JSON.parse(text);
-      got.push({ key: key ?? '', signed: verifyText(key ?? '', `parley-cloud-ingest\n${time}\n${digest}`, sig ?? ''), body });
-      if (!linked) return Response.json({ error: 'this name is not linked to an account yet' }, { status: 403 });
-      for (const c of body.calls) lines.set(c.session, Math.max(lines.get(c.session) ?? 0, c.from + c.lines.length));
-      return Response.json({ have: Object.fromEntries([...lines].map(([s, n]) => [s, { lines: n, minutes: true }])) });
-    },
-  });
-  const url = `http://127.0.0.1:${stub.port}`;
+  const stub = startCloudStub();
+  const { got, lines } = stub;
+  const url = stub.url;
   check('a name sends nothing until it is linked', (await frank.rpc('status')).cloud === undefined && got.length === 0);
 
   const made = await frank.rpc<{ url: string; link: string }>('cloud_link', { url: `${url}/some/page` });
@@ -553,11 +610,19 @@ async function cloud() {
     made.url === url && verifyText(publicKey(frank), `parley-cloud-link\n${url}\n${q.get('t')}\n${q.get('name')}`, q.get('sig') ?? '') && q.get('key') === publicKey(frank) && q.get('name') === 'Frank',
     made,
   );
-  for (let i = 0; i < 50 && (await frank.rpc('status')).cloud?.syncing !== false; i++) await Bun.sleep(100);
+  for (let i = 0; i < 50 && !(await frank.rpc('status')).cloud?.link; i++) await Bun.sleep(100);
   const waiting = (await frank.rpc('status')).cloud;
   check('until a person opens it, the status says the cloud is not taking this name', waiting?.syncing === false && waiting.error?.includes('not linked'), waiting);
+  check('and shows the link to open', frank.cli('status').includes(`Ask your user to open this link while signed in to ${url}`) && waiting?.link?.startsWith(`${url}/link?`), frank.cli('status'));
 
-  linked = true;
+  stub.accounts.set(publicKey(frank), { sub: 'acct-frank', domain: 'frank.example', sync: true });
+  for (let i = 0; i < 50 && (await frank.rpc('status')).cloud?.link; i++) await Bun.sleep(100);
+  const stored = existsSync(join(frank.home, 'attest.json')) ? readJson<AttestFile>(frank.home, 'attest.json') : undefined;
+  check(
+    'once it is linked, the proof is fetched and kept in attest.json',
+    stored?.sync === true && stored.issuer === cloudIssuer.publicKey && readAttestation(stored.att, [cloudIssuer.publicKey], publicKey(frank)).domain === 'frank.example',
+    stored,
+  );
   await open(frank, grace, 'Kept in the cloud', ['One']);
   await frank.rpc('say', { item: 'a1', text: 'for the record' });
   await frank.rpc('hangup', { reason: 'done' });
@@ -576,6 +641,8 @@ async function cloud() {
   check('every request is signed by the name’s key', got.length > 0 && got.every((g) => g.signed && g.key === publicKey(frank)));
   check('the end and the minutes are sent too', sent.some((c) => c.state === 'ended' && c.minutes?.includes('# Kept in the cloud')), sent.at(-1));
   check('the status says where sessions are sent', frank.cli('status').includes(`sent to ${url}`));
+  const head = headOf(frank, id);
+  check('the transcript header carries the caller’s proof, and no proof for a side with none', head.attest?.caller === stored?.att && head.attest.callee === undefined, head);
 
   const before = got.length;
   await frank.rpc('cloud_unlink');
@@ -585,7 +652,7 @@ async function cloud() {
   await grace.until('ended');
   await Bun.sleep(500);
   check('after `cloud off` nothing more is sent', got.length === before && (await frank.rpc('status')).cloud === undefined, got.length - before);
-  stub.stop(true);
+  stub.stop();
 }
 
 async function names() {
@@ -701,7 +768,7 @@ type Hop = { up?: WebSocket; queue: string[]; frozen: boolean };
 // both directions without closing, the way a sleeping laptop's does.
 function startProxy(target: string) {
   const hops = new Set<ServerWebSocket<Hop>>();
-  const ctl = { dropFrames: 0, connections: 0 };
+  const ctl = { dropFrames: 0, connections: 0, sent: [] as any[] };
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -721,13 +788,16 @@ function startProxy(target: string) {
         up.onmessage = (ev) => {
           if (!ws.data.frozen) ws.send(String(ev.data));
         };
-        up.onclose = () => {
-          if (!ws.data.frozen) ws.close();
+        up.onclose = (ev) => {
+          if (ws.data.frozen) return;
+          if (ev.code >= 4000) ws.close(ev.code, ev.reason);
+          else ws.close();
         };
       },
       message(ws, raw) {
         if (ws.data.frozen) return;
         const text = String(raw);
+        ctl.sent.push(JSON.parse(text));
         if (ctl.dropFrames > 0 && JSON.parse(text).payload?.kind === 'frame') {
           ctl.dropFrames--;
           return;
@@ -1337,6 +1407,197 @@ async function accountRelays() {
   }
 }
 
+// Peers on a relay that needs an account, each with the cloud stub as its
+// cloud. The proxy in front of Mia shows what her node sends the relay.
+async function accountNodes() {
+  console.log('\n# a name gets its account proof from the cloud');
+  const stub = startCloudStub();
+  const gated = startRelay(0, '127.0.0.1', { issuers: [cloudIssuer.publicKey] });
+  const gatedUrl = `ws://127.0.0.1:${gated.port}`;
+  const proxy = startProxy(gatedUrl);
+  const [mia, ned] = [new Peer('Mia', 'terminal', { PARLEY_CLOUD: stub.url }), new Peer('Ned', 'terminal', { PARLEY_CLOUD: stub.url })];
+  extras.push(mia, ned);
+  const restart = async (p: Peer) => {
+    await p.rpc('stop');
+    await Bun.sleep(300);
+    p.start();
+  };
+  try {
+    for (const p of [mia, ned]) {
+      p.init();
+      writeJson(p.home, 'config.json', { ...readJson<Config>(p.home, 'config.json'), relay: p === mia ? proxy.url : gatedUrl });
+    }
+    stub.accounts.set(publicKey(ned), { sub: 'acct-ned', domain: 'ned.example', sync: false });
+    mia.start();
+    let refused = await mia.rpc('status');
+    for (let i = 0; i < 50 && !(refused.relay.refused && refused.cloud?.link); i++) {
+      await Bun.sleep(100);
+      refused = await mia.rpc('status');
+    }
+    check(
+      'a name no account owns is refused by the relay with its reason',
+      !refused.relay.connected && refused.relay.refused && refused.relay.error?.startsWith('this relay needs a parley account'),
+      refused.relay,
+    );
+    const link = refused.cloud?.link ?? '';
+    const said = mia.cli('status');
+    check('the CLI status gives the link and says to open it', link.startsWith(`${stub.url}/link?`) && said.includes('Ask your user to open this link') && said.includes(`${stub.url}/link?`), said);
+    const mcp = await agent(mia.root, 'e2e-mia-1', { PARLEY_CLOUD: stub.url });
+    await mcp.tool('setup', { name: 'Mia' });
+    const told = await mcp.tool('status');
+    check('the agent’s status gives the link and tells it to ask its user', told.text.includes('Ask your user to open this link') && told.text.includes(`${stub.url}/link?`) && told.text.includes('the relay will not let it on'), told);
+    await mcp.client.close();
+
+    stub.accounts.set(publicKey(mia), { sub: 'acct-mia', domain: 'mia.example', sync: false, lifetime: 3600 });
+    await mia.rpc('status');
+    await connected(mia);
+    const first = readJson<AttestFile>(mia.home, 'attest.json');
+    const hellos = proxy.ctl.sent.filter((m) => m.t === 'hello');
+    check('once linked, the proof is fetched and stored', first.issuer === cloudIssuer.publicKey && first.sync === false && readAttestation(first.att, [cloudIssuer.publicKey], publicKey(mia)).sub === 'acct-mia', first);
+    check('the node gets onto the relay with the proof in its hello', hellos.at(-1)?.att === first.att && hellos.slice(0, -1).every((h) => h.att === undefined), hellos.map((h) => Boolean(h.att)));
+    ned.start();
+    await connected(ned);
+
+    for (const p of [mia, ned]) p.cursor = (await p.rpc('status')).cursor;
+    await open(mia, ned, 'Between accounts', ['One']);
+    const [atMia, atNed] = [await mia.session(), await ned.session()];
+    check('each side shows the other’s verified domain', atNed.peer.verified?.domain === 'mia.example' && atMia.peer.verified?.domain === 'ned.example', [atMia.peer, atNed.peer]);
+    check('status prints it', ned.cli('status').includes('[verified · mia.example]') && mia.cli('status').includes('"Mia" at') && mia.cli('status').includes('[verified · mia.example]'), ned.cli('status'));
+    const page = (await (await fetch(`${(await ned.rpc('status')).viewer}state`)).json()) as { view: View };
+    check('the live view is given it', page.view.session?.peer.verified?.domain === 'mia.example' && page.view.me.verified?.domain === 'ned.example');
+    const head = headOf(ned, atNed.id);
+    check('the transcript header carries both proofs', head.attest?.caller === first.att && head.attest.callee === readJson<AttestFile>(ned.home, 'attest.json').att, head.attest);
+    await mia.rpc('hangup', { reason: 'done' });
+    await mia.until('ended');
+    await ned.until('ended');
+    const minutes = readFileSync((await ned.session()).minutes ?? '', 'utf8');
+    check('the minutes show each side’s label', minutes.includes('verified · mia.example') && minutes.includes('verified · ned.example'), minutes);
+    await Bun.sleep(500);
+    check('with sync off, nothing of a session is sent', stub.got.length === 0, stub.got.length);
+
+    stub.accounts.set(publicKey(mia), { sub: 'acct-mia', domain: 'mia.example', sync: true, lifetime: 3600 });
+    const release = stub.hold();
+    proxy.ctl.sent.length = 0;
+    await restart(mia);
+    await connected(mia);
+    await Bun.sleep(1100);
+    release();
+    let renewal: any;
+    for (let i = 0; i < 50 && !renewal; i++) {
+      await Bun.sleep(100);
+      renewal = proxy.ctl.sent.find((m) => m.t === 'renew');
+    }
+    const second = readJson<AttestFile>(mia.home, 'attest.json');
+    check('a proof with less than 18 hours left is renewed and stored', second.att !== first.att && second.sync === true, second);
+    check('the renewed proof is sent on the live connection', renewal?.att === second.att && proxy.ctl.sent.find((m) => m.t === 'hello')?.att === first.att, renewal);
+    await Bun.sleep(300);
+    check('the relay keeps the connection after the renew', (await mia.rpc('status')).relay.connected);
+    for (let i = 0; i < 50 && !stub.got.some((g) => g.key === publicKey(mia) && g.body.calls.length); i++) await Bun.sleep(100);
+    check('with sync on, the sessions are sent', stub.got.some((g) => g.key === publicKey(mia) && g.body.calls.some((c) => c.session === atMia.id)) && !stub.got.some((g) => g.key === publicKey(ned)), stub.got.map((g) => g.key === publicKey(mia)));
+
+    stub.accounts.set(publicKey(mia), { sub: 'acct-mia', domain: 'mia.example', sync: true, banned: true });
+    await restart(mia);
+    let banned = await mia.rpc('status');
+    for (let i = 0; i < 30 && !banned.cloud?.error; i++) {
+      await Bun.sleep(100);
+      banned = await mia.rpc('status');
+    }
+    check('a banned account is shown as banned', banned.cloud?.error?.includes('banned') && mia.cli('status').includes('banned'), banned.cloud);
+  } finally {
+    proxy.stop();
+    gated.stop(true);
+    stub.stop();
+  }
+}
+
+// Proofs written straight into attest.json, as the cloud does for a
+// visitor's node. Quinn holds the test cloud's key, so it can check the
+// others; the forger's proof is signed by a cloud Quinn does not know.
+async function accountLabels() {
+  console.log('\n# how each side is labelled');
+  const forger = newIdentity('Some other cloud');
+  const prove = (p: Peer, by: Identity, kind: 'account' | 'visitor', domain: string | null) => {
+    const iat = unix();
+    const att = makeAttestation(by, { key: publicKey(p), sub: `acct-${p.name}`, domain, kind, via: kind === 'visitor' ? 'owner-addr' : undefined, iat, exp: iat + 86400 });
+    writeJson(p.home, 'attest.json', { att, issuer: by.publicKey, sync: false, fetchedAt: new Date().toISOString() } satisfies AttestFile);
+  };
+  const [quinn, rae, sly] = [new Peer('Quinn'), new Peer('Rae'), new Peer('Sly')];
+  extras.push(quinn, rae, sly);
+  for (const p of [quinn, rae, sly]) p.init();
+  prove(quinn, cloudIssuer, 'account', 'quinn.example');
+  prove(rae, cloudIssuer, 'visitor', null);
+  prove(sly, forger, 'account', 'bren.com');
+  for (const p of [quinn, rae, sly]) p.start();
+  for (const p of [quinn, rae, sly]) await connected(p);
+  check('a name with a visitor’s proof and no cloud uses it as it is', (await rae.rpc('status')).cloud?.url === undefined && (await rae.rpc('status')).me.verified?.kind === 'visitor');
+
+  const shown = async (caller: Peer) => {
+    quinn.cursor = (await quinn.rpc('status')).cursor;
+    await caller.call(await quinn.address(), 'Who are you', ['One']);
+    await quinn.until('incoming');
+    const s = await quinn.session();
+    const text = quinn.cli('status');
+    await quinn.rpc('approve', { accept: false, reason: 'only a test' });
+    await caller.until('ended');
+    await quinn.until('ended');
+    return { verified: s.peer.verified, text };
+  };
+  const visitor = await shown(rae);
+  check('a visitor is shown as a visitor', visitor.verified?.kind === 'visitor' && visitor.text.includes('[visitor · through an invite link]'), visitor);
+  const none = await shown(alice);
+  check('a side with no proof is shown as not verified', none.verified === undefined && none.text.includes('[not verified]'), none);
+  const forged = await shown(sly);
+  check('a proof from a cloud this node does not know is not shown as verified', forged.verified === undefined && forged.text.includes('[not verified]') && !forged.text.includes('bren.com'), forged);
+
+  console.log('\n# a group roster carries each side’s label');
+  for (const p of [quinn, rae, sly]) p.cursor = (await p.rpc('status')).cursor;
+  await quinn.rpc('call', { address: [await rae.address(), await sly.address()], title: 'Labelled', items: ['One'] });
+  await rae.until('incoming');
+  await sly.until('incoming');
+  const [q, r] = [await quinn.session(), await rae.session()];
+  const label = (s: typeof q, p: Peer) => s.sides?.find((x) => x.address === p.home.split('/').at(-1));
+  check(
+    'the caller sees each called side’s label',
+    label(q, rae)?.verified?.kind === 'visitor' && label(q, sly)?.verified === undefined && label(q, quinn)?.verified?.domain === 'quinn.example',
+    q.sides,
+  );
+  check(
+    'a called side sees every side’s label from the roster',
+    label(r, quinn)?.verified?.domain === 'quinn.example' && label(r, sly)?.verified === undefined && label(r, rae)?.verified?.kind === 'visitor' && rae.cli('status').includes('[verified · quinn.example]'),
+    r.sides,
+  );
+  const head = headOf(quinn, q.id);
+  check('the header gives each side’s proof', head.sides?.find((x: any) => x.address === (label(q, rae)?.address))?.att === readJson<AttestFile>(rae.home, 'attest.json').att, head.sides);
+  await quinn.rpc('hangup', { reason: 'done' });
+  for (const p of [quinn, rae, sly]) await p.until('ended');
+}
+
+async function ringLimit() {
+  console.log('\n# an address that rings too often');
+  const [tess, sam] = [new Peer('Tess'), new Peer('Sam')];
+  sam.shippedRingLimit = true;
+  extras.push(tess, sam);
+  for (const p of [tess, sam]) p.init();
+  for (const p of [tess, sam]) p.start();
+  for (const p of [tess, sam]) await connected(p);
+  for (let i = 0; i < 3; i++) {
+    await tess.call(await sam.address(), `Ring ${i + 1}`, ['One']);
+    await sam.until('incoming');
+    await sam.rpc('approve', { accept: false, reason: 'not now' });
+    await tess.until('ended');
+    await sam.until('ended');
+  }
+  check('three rings in ten minutes reach a person', (await tess.session()).endedReason === 'the other side declined: not now');
+  await tess.call(await sam.address(), 'Ring 4', ['One']);
+  const ended = (await tess.until('ended')).find((e) => e.kind === 'ended');
+  const seen = await sam.news(500);
+  check(
+    'the fourth is declined at once, without asking anyone',
+    ended?.kind === 'ended' && ended.reason === 'the other side declined: too many calls from this address; try again later' && !seen.some((e) => e.kind === 'incoming'),
+    [ended, seen],
+  );
+}
+
 const dave = new Peer('Dave');
 const extras: Peer[] = [dave];
 
@@ -1363,6 +1624,9 @@ try {
   await groupLosesSide();
   await groupDialDropouts();
   await accountRelays();
+  await accountNodes();
+  await accountLabels();
+  await ringLimit();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.message : err);

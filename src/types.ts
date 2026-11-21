@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 
 export type Who = 'me' | 'peer';
 
@@ -20,6 +20,7 @@ const reason = z.string().max(LIMITS.reason);
 const text = z.string().min(1).max(LIMITS.text);
 const item = z.string().min(1).max(12);
 const side = z.string().regex(/^[a-h]$/);
+const att = z.string().max(4000).optional();
 
 const signedBase = {
   session: z.string(),
@@ -36,7 +37,7 @@ export const EntrySchema = z.discriminatedUnion('type', [
     title,
     items: z.array(title).min(1).max(LIMITS.itemsAtCall),
     roster: z
-      .array(z.object({ id: side, address: z.string(), key: z.string().max(100) }))
+      .array(z.object({ id: side, address: z.string(), key: z.string().max(100), att }))
       .min(3)
       .max(LIMITS.sides)
       .optional(),
@@ -70,6 +71,8 @@ export const ControlSchema = z.object({
   // Asked for on the ring of a call with more than two sides, and echoed on
   // the answer by a node that can take one. A 0.2.0 node drops it.
   group: z.literal(1).optional(),
+  // The sender's account proof, on a ring and on the answer to one.
+  att,
 });
 
 export type Control = z.infer<typeof ControlSchema>;
@@ -118,8 +121,11 @@ export type ItemView = {
   dropReason?: string;
 };
 
+export type Verified = { domain: string | null; kind: 'account' | 'visitor' };
+
 export type SideView = {
   id: string;
+  verified?: Verified;
   name?: string;
   address: string;
   you?: true;
@@ -133,7 +139,7 @@ export type SessionView = {
   id: string;
   role: 'caller' | 'callee';
   state: SessionState;
-  peer: { address: string; name?: string; knownSince?: string; savedAs?: string };
+  peer: { address: string; name?: string; knownSince?: string; savedAs?: string; verified?: Verified };
   // Set on the copy an agent is given of a call nobody has accepted yet.
   withheld?: true;
   // Only on a session of more than two sides, you included.
@@ -160,9 +166,13 @@ export type View = {
   cursor: number;
   approval: 'dialog' | 'terminal';
   viewer: string;
-  me: { name: string; address: string };
-  relay: { url: string; connected: boolean; error?: string };
-  cloud?: { url: string; syncing: boolean; error?: string };
+  me: { name: string; address: string; verified?: Verified };
+  // `refused` is set when the relay closed this name's connection for want
+  // of an account proof.
+  relay: { url: string; connected: boolean; error?: string; refused?: true };
+  // `url` is missing for a visitor's name, which has a proof but no cloud.
+  // `link` is set while no account owns this name.
+  cloud?: { url?: string; link?: string; sync: boolean; syncing: boolean; error?: string };
   session?: SessionView;
 };
 

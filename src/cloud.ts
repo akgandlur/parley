@@ -1,18 +1,25 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { readAttestation } from './attest';
 import { signText, type Identity } from './crypto';
 import { readJson, writeJson } from './home';
-import type { SessionState, View } from './types';
+import type { SessionState, Verified, View } from './types';
 
-// Off unless a person links this name to a cloud account. Once linked, the
-// node sends that cloud every session's transcript as it is written, the
-// other side's entries included. The cloud can read them: this is the one
-// place a session leaves the two machines.
+// A name linked to a cloud account gets from it the proof that lets it onto
+// a relay that needs one. It sends that cloud its sessions only while the
+// account keeps them (`sync`), and then every transcript as it is written,
+// the other side's entries included. The cloud can read them: this is the
+// one place a session leaves the two machines.
 
 const RETRY_MS = [2000, 5000, 15_000, 60_000];
 const HEARTBEAT_MS = 30_000;
 const BATCH_BYTES = 200_000;
+const RENEW_LEFT_MS = 18 * 3600_000;
+const CHECK_MS = 10 * 60_000;
+const UNLINKED_CHECK_MS = 30_000;
+
+export type AttestFile = { att: string; issuer: string; sync: boolean; fetchedAt: string };
 
 export type Live = {
   id: string;
@@ -66,10 +73,28 @@ export function startCloud(
   me: Identity,
   log: (...parts: unknown[]) => void,
   live: () => Live | undefined,
+  renewed: (att: string) => void,
 ) {
-  let url = existsSync(join(home, 'cloud.json'))
-    ? readJson<{ url: string }>(home, 'cloud.json').url
+  // Read with `now` at 0 so an expired proof still says when it ran out.
+  const own = (f: AttestFile) => readAttestation(f.att, [f.issuer], me.publicKey, 0);
+  let attest = existsSync(join(home, 'attest.json'))
+    ? readJson<AttestFile>(home, 'attest.json')
     : undefined;
+  if (attest) own(attest);
+  // cloud.json holds null once a person has turned the cloud off. A visitor's
+  // node has a proof the cloud wrote for it and no link to renew it through.
+  const saved = existsSync(join(home, 'cloud.json'))
+    ? readJson<{ url: string | null }>(home, 'cloud.json').url
+    : undefined;
+  let url = saved === null ? undefined : (saved ?? (attest ? undefined : process.env.PARLEY_CLOUD));
+  if (url && saved === undefined) {
+    url = originOf(url);
+    writeJson(home, 'cloud.json', { url });
+  }
+  let refusal: 'not linked' | 'banned' | undefined;
+  let attestError: string | undefined;
+  let checking: Promise<void> | undefined;
+  let lastCheck = 0;
   let have: Have | undefined;
   let error: string | undefined;
   let dirty = false;
@@ -77,18 +102,82 @@ export function startCloud(
   let failures = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  async function post(calls: Call[]): Promise<Have> {
-    const body = JSON.stringify({ name: me.name, calls });
+  const headers = (kind: string, body: string) => {
     const time = new Date().toISOString();
     const digest = createHash('sha256').update(body).digest('hex');
+    return {
+      'content-type': 'application/json',
+      'x-parley-key': me.publicKey,
+      'x-parley-time': time,
+      'x-parley-sig': signText(me, `parley-cloud-${kind}\n${time}\n${digest}`),
+    };
+  };
+
+  const keeping = () => Boolean(url && attest?.sync && !refusal);
+
+  async function fetchAttest() {
+    const body = JSON.stringify({ name: me.name });
+    const res = await fetch(`${url}/api/attest`, {
+      method: 'POST',
+      headers: headers('attest', body),
+      body,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const reply = (await res.json().catch(() => ({}))) as Partial<AttestFile> & { error?: string };
+    if (res.status === 403 && (reply.error === 'not linked' || reply.error === 'banned')) {
+      if (refusal !== reply.error) log(`the cloud says this name is ${reply.error}`);
+      refusal = reply.error;
+      return;
+    }
+    if (!res.ok || typeof reply.att !== 'string' || typeof reply.issuer !== 'string' || typeof reply.sync !== 'boolean') {
+      throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    }
+    readAttestation(reply.att, [reply.issuer], me.publicKey);
+    refusal = undefined;
+    const keep =
+      attest?.issuer === reply.issuer && own(attest).exp * 1000 - Date.now() >= RENEW_LEFT_MS;
+    const wasKeeping = keeping();
+    attest = {
+      att: keep && attest ? attest.att : reply.att,
+      issuer: reply.issuer,
+      sync: reply.sync,
+      fetchedAt: new Date().toISOString(),
+    };
+    writeJson(home, 'attest.json', attest, true);
+    if (!keep) renewed(attest.att);
+    if (keeping() && !wasKeeping) touch();
+  }
+
+  function check(): Promise<void> {
+    if (!url) return Promise.resolve();
+    checking ??= fetchAttest()
+      .then(
+        () => {
+          attestError = undefined;
+        },
+        (err) => {
+          const why = err instanceof Error ? err.message : String(err);
+          if (why !== attestError) log('could not get the account proof:', why);
+          attestError = why;
+        },
+      )
+      .finally(() => {
+        checking = undefined;
+        lastCheck = Date.now();
+      });
+    return checking;
+  }
+
+  setInterval(() => {
+    const due = !attest || refusal || attestError ? UNLINKED_CHECK_MS : CHECK_MS;
+    if (url && Date.now() - lastCheck >= due) void check();
+  }, 5000).unref();
+
+  async function post(calls: Call[]): Promise<Have> {
+    const body = JSON.stringify({ name: me.name, calls });
     const res = await fetch(`${url}/api/ingest`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-parley-key': me.publicKey,
-        'x-parley-time': time,
-        'x-parley-sig': signText(me, `parley-cloud-ingest\n${time}\n${digest}`),
-      },
+      headers: headers('ingest', body),
       body,
       signal: AbortSignal.timeout(15_000),
     });
@@ -155,10 +244,10 @@ export function startCloud(
   }
 
   async function run() {
-    if (running || !url) return;
+    if (running || !keeping()) return;
     running = true;
     try {
-      while (dirty && url) {
+      while (dirty && keeping()) {
         dirty = false;
         await sync();
         if (error) log('cloud sync is working again');
@@ -167,9 +256,17 @@ export function startCloud(
       }
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
+      have = undefined;
+      // The person turned the switch off since the last check.
+      if (why === 'not kept' && attest) {
+        log('the cloud no longer keeps this name\'s sessions');
+        attest = { ...attest, sync: false };
+        writeJson(home, 'attest.json', attest, true);
+        error = undefined;
+        return;
+      }
       if (why !== error) log('cloud sync failed:', why);
       error = why;
-      have = undefined;
       dirty = true;
       clearTimeout(timer);
       timer = setTimeout(run, RETRY_MS[Math.min(failures++, RETRY_MS.length - 1)]);
@@ -179,7 +276,7 @@ export function startCloud(
   }
 
   function touch() {
-    if (!url) return;
+    if (!keeping()) return;
     dirty = true;
     clearTimeout(timer);
     timer = setTimeout(run, 200);
@@ -192,35 +289,72 @@ export function startCloud(
     if (now && now.state !== 'ended') touch();
   }, HEARTBEAT_MS).unref();
 
-  touch();
+  // The link carries no secret of the node's. Whoever opens it while signed
+  // in to the cloud ties this name to their account, so it goes to the
+  // person and is good for a few minutes only.
+  function linkTo(to: string) {
+    const t = new Date().toISOString();
+    const query = new URLSearchParams({
+      key: me.publicKey,
+      name: me.name,
+      t,
+      sig: signText(me, `parley-cloud-link\n${to}\n${t}\n${me.name}`),
+    });
+    return `${to}/link?${query}`;
+  }
+
+  void check();
 
   return {
     touch,
-    state: (): View['cloud'] => (url ? { url, syncing: !error, error } : undefined),
-    // The link carries no secret of the node's. Whoever opens it while signed
-    // in to the cloud ties this name to their account, so it goes to the
-    // person and is good for a few minutes only.
+    check,
+    // For a status asked while the name waits on its person to link it.
+    recheck: () => (Date.now() - lastCheck < 2000 ? Promise.resolve() : check()),
+    att: () => attest?.att,
+    issuers: () => (attest ? [attest.issuer] : []),
+    verified: (): Verified | undefined => {
+      if (!attest) return undefined;
+      const a = own(attest);
+      return { domain: a.domain, kind: a.kind };
+    },
+    state: (): View['cloud'] => {
+      if (!url && !attest) return undefined;
+      const sync = Boolean(attest?.sync) && !refusal;
+      return {
+        url,
+        link: url && refusal === 'not linked' ? linkTo(url) : undefined,
+        sync,
+        syncing: sync && !error,
+        error:
+          refusal === 'banned'
+            ? 'the account this name is linked to is banned'
+            : refusal === 'not linked'
+              ? 'this name is not linked to an account yet'
+              : (attestError ?? error),
+      };
+    },
     link(to: string | undefined): { url: string; link: string } {
       const given = to ?? url ?? process.env.PARLEY_CLOUD;
       if (!given) throw new Error('no cloud address is known; give one, like https://cloud.example.com');
-      url = originOf(given);
-      writeJson(home, 'cloud.json', { url });
+      const next = originOf(given);
+      if (next !== url) {
+        url = next;
+        refusal = undefined;
+        writeJson(home, 'cloud.json', { url });
+      }
       have = undefined;
       error = undefined;
-      touch();
-      const t = new Date().toISOString();
-      const query = new URLSearchParams({
-        key: me.publicKey,
-        name: me.name,
-        t,
-        sig: signText(me, `parley-cloud-link\n${url}\n${t}\n${me.name}`),
-      });
-      return { url, link: `${url}/link?${query}` };
+      void check();
+      return { url: next, link: linkTo(next) };
     },
     unlink() {
-      rmSync(join(home, 'cloud.json'), { force: true });
+      writeJson(home, 'cloud.json', { url: null });
+      rmSync(join(home, 'attest.json'), { force: true });
       clearTimeout(timer);
       url = undefined;
+      attest = undefined;
+      refusal = undefined;
+      attestError = undefined;
       have = undefined;
       error = undefined;
     },

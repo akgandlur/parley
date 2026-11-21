@@ -1,4 +1,4 @@
-import type { Ev, ItemView, SessionView, SideView, View } from './types';
+import type { Ev, ItemView, SessionView, SideView, Verified, View } from './types';
 
 const STATE_TEXT: Record<SessionView['state'], string> = {
   dialing: 'calling',
@@ -9,13 +9,22 @@ const STATE_TEXT: Record<SessionView['state'], string> = {
   ended: 'ended',
 };
 
+export const verifiedText = (v: Verified | undefined) =>
+  !v
+    ? 'not verified'
+    : v.kind === 'visitor'
+      ? 'visitor · through an invite link'
+      : v.domain
+        ? `verified · ${v.domain}`
+        : 'verified';
+
 const label = (x: SideView) =>
-  `${x.name ? `"${x.name}"` : 'an unnamed side'} (${x.id}, ${x.address})${x.left ? `, who left: ${x.left}` : ''}`;
+  `${x.name ? `"${x.name}"` : 'an unnamed side'} (${x.id}, ${x.address}) [${verifiedText(x.verified)}]${x.left ? `, who left: ${x.left}` : ''}`;
 
 const who = (s: SessionView) =>
   s.sides
     ? s.sides.filter((x) => !x.you).map(label).join(', ')
-    : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? 'a new caller' : 'an unnamed caller'} (${s.peer.address})`;
+    : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? 'a new caller' : 'an unnamed caller'} (${s.peer.address}) [${verifiedText(s.peer.verified)}]`;
 
 const sideName = (s: SessionView, id: string) => {
   const x = s.sides?.find((y) => y.id === id);
@@ -68,15 +77,29 @@ export const renderCall = (s: SessionView | undefined) =>
 
 export function renderView(v: View): string {
   const lines = [
-    `You are "${v.me.name}" at ${v.me.address}. Relay ${v.relay.connected ? 'connected' : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ''}`} (${v.relay.url}).`,
+    `You are "${v.me.name}" at ${v.me.address} [${verifiedText(v.me.verified)}]. Relay ${v.relay.connected ? 'connected' : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ''}`} (${v.relay.url}).`,
   ];
   // A node from before the live view existed can still be finishing a call.
   if (v.viewer) lines.push(`Live view for your user: ${v.viewer}`);
-  if (v.cloud) {
+  const c = v.cloud;
+  if (c?.link) {
     lines.push(
-      v.cloud.syncing
-        ? `Cloud: this name's sessions are sent to ${v.cloud.url}.`
-        : `Cloud: NOT reaching ${v.cloud.url}: ${v.cloud.error}`,
+      `This name is not linked to a parley account yet${v.relay.refused ? ', so the relay will not let it on' : ''}. Ask your user to open this link while signed in to ${c.url}; it works for 15 minutes:`,
+      c.link,
+    );
+  } else if (v.relay.refused) {
+    lines.push(
+      c?.url
+        ? `The relay needs this name linked to a parley account. Waiting on ${c.url}${c.error ? `: ${c.error}` : ''}.`
+        : 'The relay needs this name linked to a parley account. Ask your user for their parley cloud address, then link this name with cloud_link (or `parley cloud link --url <address>`).',
+    );
+  } else if (c?.url) {
+    lines.push(
+      c.error
+        ? `Cloud: NOT reaching ${c.url}: ${c.error}`
+        : c.sync
+          ? `Cloud: this name's sessions are sent to ${c.url}.`
+          : `Cloud: linked to ${c.url}, which keeps none of this name's sessions.`,
     );
   }
   const s = v.session;
@@ -145,8 +168,8 @@ export function renderEvent(e: Ev, v: View): string {
 export function renderMinutes(v: View, started: Date, ended: Date): string {
   const s = v.session;
   if (!s) throw new Error('no session to write minutes for');
-  const mine = `${v.me.name} (${v.me.address})`;
-  const theirs = `${s.peer.name} (${s.peer.address})`;
+  const mine = `${v.me.name} (${v.me.address}, ${verifiedText(v.me.verified)})`;
+  const theirs = `${s.peer.name} (${s.peer.address}) [${verifiedText(s.peer.verified)}]`;
   const named = (id: string) => {
     const x = s.sides?.find((y) => y.id === id);
     return x?.name ?? x?.address;
@@ -156,7 +179,7 @@ export function renderMinutes(v: View, started: Date, ended: Date): string {
   const of = (state: ItemView['state']) => s.items.filter((i) => i.state === state);
   const added = (i: ItemView) =>
     i.addedBy === 'call' ? '' : ` (added during the session by ${by(i.addedBy, i.addedById)})`;
-  const all = s.sides?.map((x) => `${x.name ?? 'unnamed'} (${x.address})`);
+  const all = s.sides?.map((x) => `${x.name ?? 'unnamed'} (${x.address}, ${verifiedText(x.verified)})`);
   const between = all
     ? `${all.slice(0, -1).join(', ')} and ${all.at(-1)}`
     : `${mine} and ${theirs}`;

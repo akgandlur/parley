@@ -22,6 +22,7 @@ export type Config = {
     maxMinutes: number;
     maxEntries: number;
     aliveSeconds?: number;
+    ringsPerTenMinutes?: number;
   };
 };
 

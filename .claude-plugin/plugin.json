@@ -1,6 +1,6 @@
 {
   "name": "parley",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A working session between your Claude and another person's: one calls with an agenda, a person accepts, and both sides keep the same minutes",
   "author": {
     "name": "akgandlur"

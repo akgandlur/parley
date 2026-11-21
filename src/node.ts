@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { z } from 'zod';
 import VIEWER from './viewer.html' with { type: 'text' };
+import { readAttestation } from './attest';
 import {
   addressOf,
   deriveSessionKeys,
@@ -32,7 +33,7 @@ import {
 import { startCloud } from './cloud';
 import { request } from './ipc';
 import { openInBrowser } from './open';
-import { renderMinutes } from './render';
+import { renderMinutes, verifiedText } from './render';
 import { RELAY_AUTH } from './relay';
 import {
   ArgSchemas,
@@ -47,6 +48,7 @@ import {
   type EvBody,
   type FeedEntry,
   type SessionState,
+  type Verified,
   type View,
   type WaitResult,
   type Who,
@@ -64,6 +66,8 @@ const CONNECT_WAIT_MS = 15_000;
 const QUIET_SHOWN = 3;
 const QUIET_ENDS = 6;
 const ALIVE_MISSES = 3;
+const RING_WINDOW_MS = 10 * 60_000;
+const TOO_MANY_RINGS = 'too many calls from this address; try again later';
 
 const LETTERS = 'abcdefgh';
 
@@ -89,6 +93,8 @@ type Side = {
   name?: string;
   knownSince?: string;
   savedAs?: string;
+  att?: string;
+  verified?: Verified;
   // The seq of this author's next entry. Every entry an author sends goes
   // to the caller, so a forwarded run has no gaps a hub could hide.
   nextSeq: number;
@@ -138,6 +144,8 @@ type Session = {
   endedAt?: number;
   dialog?: ChildProcess;
   answerIn?: Config['approval'];
+  // Declined as soon as its agenda arrives, without asking anyone.
+  declineWith?: string;
 };
 
 class ProtocolError extends Error {}
@@ -207,7 +215,10 @@ export async function runNode(home: string) {
   let socket: WebSocket | undefined;
   let relayReady = false;
   let relayError: string | undefined;
+  let relayRefused = false;
   let retryMs = 2000;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  const rings = new Map<string, number[]>();
   let socketSince = 0;
   let probe: { n: number; at: number } | undefined;
   let probeCounter = 0;
@@ -225,20 +236,45 @@ export async function runNode(home: string) {
     if (explain(err).includes('already running')) throw err;
   }
 
-  const cloud = startCloud(home, me, log, () => {
-    const s = current;
-    return (
-      s && {
-        id: s.id,
-        dir: s.dir,
-        role: s.role,
-        state: s.state,
-        peer: { address: peerOf(s).address, name: peerOf(s).name },
-        title: s.title,
-        endedReason: s.state === 'ended' ? s.endReason : undefined,
+  const cloud = startCloud(
+    home,
+    me,
+    log,
+    () => {
+      const s = current;
+      return (
+        s && {
+          id: s.id,
+          dir: s.dir,
+          role: s.role,
+          state: s.state,
+          peer: { address: peerOf(s).address, name: peerOf(s).name },
+          title: s.title,
+          endedReason: s.state === 'ended' ? s.endReason : undefined,
+        }
+      );
+    },
+    (att) => {
+      if (socket && relayReady) socket.send(JSON.stringify({ t: 'renew', att }));
+      else if (!socket && relayRefused) {
+        clearTimeout(retryTimer);
+        connectRelay();
       }
-    );
-  });
+    },
+  );
+
+  // A proof this node cannot check (no issuer of its own, or a bad one) is
+  // shown as no proof at all.
+  function verify(att: string | undefined, key: string, who: string): Verified | undefined {
+    if (att === undefined) return undefined;
+    try {
+      const a = readAttestation(att, cloud.issuers(), key);
+      return { domain: a.domain, kind: a.kind };
+    } catch (err) {
+      log(`the account proof from ${who} does not check out:`, explain(err));
+      return undefined;
+    }
+  }
 
   function emit(ev: EvBody) {
     cloud.touch();
@@ -264,9 +300,11 @@ export async function runNode(home: string) {
       socket = undefined;
       relayReady = false;
       relayError = ev.reason || 'cannot reach it';
+      relayRefused = ev.code === 4003;
       relayAnswered();
       log(`relay connection closed (${ev.code} ${ev.reason}); retrying`);
-      setTimeout(connectRelay, retryMs);
+      if (relayRefused) void cloud.check();
+      retryTimer = setTimeout(connectRelay, retryMs);
       retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
     };
     ws.onerror = () => {};
@@ -314,11 +352,13 @@ export async function runNode(home: string) {
           t: 'hello',
           publicKey: me.publicKey,
           sig: signText(me, RELAY_AUTH + msg.nonce),
+          att: cloud.att(),
         }),
       );
     } else if (msg.t === 'ready') {
       relayReady = true;
       relayError = undefined;
+      relayRefused = false;
       if (current && current.state !== 'ended') {
         for (const leg of current.legs) leg.lastHeard = Date.now();
       }
@@ -360,6 +400,7 @@ export async function runNode(home: string) {
       at: new Date().toISOString(),
       eph,
       group: group ? 1 : undefined,
+      att: kind === 'busy' ? undefined : cloud.att(),
     });
     relaySend(
       to,
@@ -528,6 +569,9 @@ export async function runNode(home: string) {
         emit({ kind: 'impostor', address: from });
         return;
       }
+      const now = Date.now();
+      const recent = [...(rings.get(from) ?? []).filter((t) => now - t < RING_WINDOW_MS), now];
+      rings.set(from, recent);
       if (s && s.state !== 'ended') {
         sendControl(from, 'busy', c.session);
         return;
@@ -535,7 +579,10 @@ export async function runNode(home: string) {
       const next = startSession(c.session, 'callee', [from]);
       const leg = next.legs[0]!;
       next.group = c.group === 1;
+      if (recent.length > (config.limits.ringsPerTenMinutes ?? 3)) next.declineWith = TOO_MANY_RINGS;
       leg.side.publicKey = key;
+      leg.side.att = c.att;
+      leg.side.verified = verify(c.att, key, from);
       leg.keys = deriveSessionKeys(leg.eph, c.eph, next.id, 'callee');
       next.state = 'ringing';
       writeHeader(next);
@@ -562,6 +609,8 @@ export async function runNode(home: string) {
     }
     if (!c.eph) return;
     leg.side.publicKey = key;
+    leg.side.att = c.att;
+    leg.side.verified = verify(c.att, key, from);
     leg.keys = deriveSessionKeys(leg.eph, c.eph, s.id, 'caller');
     leg.group = c.group === 1;
     if (s.group && !leg.group) {
@@ -581,8 +630,8 @@ export async function runNode(home: string) {
       items: s.items.map((i) => i.title),
       roster: s.group
         ? [
-            { id: 'a', address, key: me.publicKey },
-            ...s.sides.map((x) => ({ id: x.id, address: x.address, key: x.publicKey ?? '' })),
+            { id: 'a', address, key: me.publicKey, att: cloud.att() },
+            ...s.sides.map((x) => ({ id: x.id, address: x.address, key: x.publicKey ?? '', att: x.att })),
           ]
         : undefined,
     });
@@ -703,15 +752,17 @@ export async function runNode(home: string) {
     const mine = { address, publicKey: me.publicKey };
     const peer = peerOf(s);
     const theirs = { address: peer.address, publicKey: peer.publicKey };
+    const [callerAtt, calleeAtt] = s.role === 'caller' ? [cloud.att(), peer.att] : [peer.att, cloud.att()];
     record(
       s,
       JSON.stringify({
         session: s.id,
         caller: s.role === 'caller' ? mine : theirs,
         callee: s.role === 'caller' ? theirs : mine,
+        attest: { caller: callerAtt, callee: calleeAtt },
         sides:
           s.group && s.role === 'caller'
-            ? s.sides.map((x) => ({ id: x.id, address: x.address, publicKey: x.publicKey }))
+            ? s.sides.map((x) => ({ id: x.id, address: x.address, publicKey: x.publicKey, att: x.att }))
             : undefined,
       }),
     );
@@ -791,6 +842,8 @@ export async function runNode(home: string) {
         publicKey: r.key,
         knownSince: contacts[r.address]?.firstSeen,
         savedAs: contacts[r.address]?.name,
+        att: r.att,
+        verified: verify(r.att, r.key, r.address),
         nextSeq: 0,
       })),
     ];
@@ -884,6 +937,10 @@ export async function runNode(home: string) {
         s.state = 'awaiting_approval';
         if (by === 'peer') {
           peerOf(s).name = e.name;
+          if (s.declineWith) {
+            log(`declined a call from ${peerOf(s).address}: ${s.declineWith}`);
+            return decide(s, false, s.declineWith);
+          }
           s.answerIn = config.approval;
           emit({ kind: 'incoming' });
           void promptForApproval(s);
@@ -1057,6 +1114,7 @@ export async function runNode(home: string) {
     const peer = peerOf(s);
     const text = [
       `${clean(peer.name ?? 'Someone')} is calling "${clean(me.name)}", one of your Claude Code sessions.`,
+      `Account: ${verifiedText(peer.verified)}`,
       `Address: ${peer.address}`,
       peer.knownSince
         ? `You first connected to this address on ${peer.knownSince.slice(0, 10)}.`
@@ -1064,7 +1122,7 @@ export async function runNode(home: string) {
       ...(s.group
         ? [
             'Also called into this session:',
-            ...s.sides.slice(1).map((x) => `  • ${x.savedAs ? clean(x.savedAs) : 'someone you have not connected to'} (${x.address})`),
+            ...s.sides.slice(1).map((x) => `  • ${x.savedAs ? clean(x.savedAs) : 'someone you have not connected to'} (${x.address}, ${verifiedText(x.verified)})`),
           ]
         : []),
       '',
@@ -1121,8 +1179,13 @@ export async function runNode(home: string) {
       cursor: counter,
       approval: s?.answerIn ?? config.approval,
       viewer: viewerUrl,
-      me: { name: me.name, address },
-      relay: { url: relayUrl, connected: relayReady, error: relayError },
+      me: { name: me.name, address, verified: cloud.verified() },
+      relay: {
+        url: relayUrl,
+        connected: relayReady,
+        error: relayError,
+        refused: relayRefused && !relayReady ? true : undefined,
+      },
       cloud: cloud.state(),
       session: s && {
         id: s.id,
@@ -1133,14 +1196,16 @@ export async function runNode(home: string) {
           name: peerOf(s).name,
           knownSince: peerOf(s).knownSince,
           savedAs: peerOf(s).savedAs,
+          verified: peerOf(s).verified,
         },
         sides: s.group
           ? [
-              { id: s.self, name: me.name, address, you: true as const },
+              { id: s.self, name: me.name, address, you: true as const, verified: cloud.verified() },
               ...s.sides.map((x) => ({
                 id: x.id,
                 name: x.name,
                 address: x.address,
+                verified: x.verified,
                 knownSince: x.knownSince,
                 savedAs: x.savedAs,
                 left: s.left.get(x.id),
@@ -1220,6 +1285,9 @@ export async function runNode(home: string) {
         relayFirstAnswer,
         new Promise((resolve) => setTimeout(resolve, 3000)),
       ]);
+      if (relayRefused || cloud.state()?.link) {
+        await Promise.race([cloud.recheck(), new Promise((resolve) => setTimeout(resolve, 3000))]);
+      }
       return view();
     },
     call: (args) => {
