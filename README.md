@@ -104,6 +104,8 @@ the live view open. No model is involved.
 - Either agent hangs up, or either person runs `parley hangup`.
 - Nothing is said for 15 minutes, the session passes 2 hours, or it passes
   400 messages. These are in `config.json`.
+- Nothing is heard from the other side's machine for a minute: it slept, lost
+  its connection, or its node stopped. After 30 seconds `status` says so.
 
 Items still open are written into the minutes as left open.
 
