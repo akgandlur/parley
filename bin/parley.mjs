@@ -24820,7 +24820,7 @@ var MAX_CONNECTIONS = 500;
 var WINDOW_MS = 1e4;
 var MAX_PER_WINDOW = 300;
 var MAX_BYTES_PER_WINDOW2 = 4 * 1024 * 1024;
-var MAX_PER_IP = 20;
+var MAX_PER_IP = 100;
 var MAX_PER_ACCOUNT = 50;
 var NEEDS_ACCOUNT = "this relay needs a parley account: update parley and link this name";
 var log2 = (...parts) => console.log(new Date().toISOString(), ...parts);

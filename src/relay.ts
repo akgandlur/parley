@@ -10,7 +10,7 @@ const MAX_CONNECTIONS = 500;
 const WINDOW_MS = 10_000;
 const MAX_PER_WINDOW = 300;
 const MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
-const MAX_PER_IP = 20;
+export const MAX_PER_IP = 100;
 const MAX_PER_ACCOUNT = 50;
 const NEEDS_ACCOUNT = 'this relay needs a parley account: update parley and link this name';
 

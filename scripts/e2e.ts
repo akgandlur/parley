@@ -22,7 +22,7 @@ import {
 import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Config, type Contact } from '../src/home';
 import { request, type NodeInfo } from '../src/ipc';
-import { RELAY_AUTH, startRelay } from '../src/relay';
+import { MAX_PER_IP, RELAY_AUTH, startRelay } from '../src/relay';
 import { VERSION, type Ev, type View, type WaitResult } from '../src/types';
 import type { AttestFile } from '../src/cloud';
 
@@ -1350,15 +1350,15 @@ async function accountRelays() {
     check('and is closed when the renewed proof expires', later?.code === 4003 && later.reason === 'the account proof has expired', later);
 
     const crowd: Link[] = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < MAX_PER_IP; i++) {
       const id = newIdentity(`Crowd ${i}`);
       crowd.push(keep(await dialRelay(url, id, proof(id, `crowd-${i}`), '10.0.0.1, 203.0.113.7')));
     }
     const extra = newIdentity('One too many');
     const over = keep(await dialRelay(url, extra, proof(extra, 'crowd-x'), '203.0.113.7'));
     const elsewhere = keep(await dialRelay(url, extra, proof(extra, 'crowd-x'), '203.0.113.7, 198.51.100.9'));
-    check('twenty connections from one IP are let in', crowd.every((l) => l.ready), crowd.map((l) => l.closed));
-    check('the 21st from that IP is closed with 4029', !over.ready && over.closed?.code === 4029, over.closed);
+    check(`${MAX_PER_IP} connections from one IP are let in`, crowd.every((l) => l.ready), crowd.map((l) => l.closed));
+    check('one more from that IP is closed with 4029', !over.ready && over.closed?.code === 4029, over.closed);
     check('behind a loopback proxy, the last X-Forwarded-For hop is the IP', elsewhere.ready, elsewhere.closed);
     await shut([crowd[0]!]);
     const again = keep(await dialRelay(url, newIdentity('Back'), undefined, '203.0.113.7'));
@@ -1370,11 +1370,11 @@ async function accountRelays() {
     const direct = startRelay(0, lan, { issuers: [issuer.publicKey] });
     try {
       const spoofed: Link[] = [];
-      for (let i = 0; i < 21; i++) {
+      for (let i = 0; i <= MAX_PER_IP; i++) {
         const id = newIdentity(`Spoof ${i}`);
         spoofed.push(keep(await dialRelay(`ws://${lan}:${direct.port}`, id, proof(id, `spoof-${i}`), `192.0.2.${i}`)));
       }
-      check('from a peer that is not loopback, X-Forwarded-For is ignored', spoofed.slice(0, 20).every((l) => l.ready) && spoofed[20]!.closed?.code === 4029, spoofed.map((l) => l.closed?.code));
+      check('from a peer that is not loopback, X-Forwarded-For is ignored', spoofed.slice(0, MAX_PER_IP).every((l) => l.ready) && spoofed[MAX_PER_IP]!.closed?.code === 4029, spoofed.map((l) => l.closed?.code));
       await shut(spoofed);
     } finally {
       direct.stop(true);

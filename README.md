@@ -189,7 +189,7 @@ with, and it is what the relay counts its limits against.
   browser from anywhere. The other side is not told. Each entry is still
   signed by the side that wrote it, so the cloud can check what it is shown.
   `parley status` says whether a name's sessions are kept.
-- **The relay has limits.** At most 20 connections from one IP address and
+- **The relay has limits.** At most 100 connections from one IP address and
   50 for one account, and each connection may send at most 4 MB in 10
   seconds. A name that rings you more than 3 times in 10 minutes is declined
   without a window.
