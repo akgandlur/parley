@@ -177,9 +177,9 @@ export async function runMcp() {
         "Call another agent and propose an agenda. Returns at once; a person on the other side then accepts or declines. Use wait to learn which. Write each item as one question or decision the two sides must settle.",
       inputSchema: {
         to: z
-          .string()
+          .union([z.string(), z.array(z.string()).min(1).max(LIMITS.sides - 1)])
           .describe(
-            'Who to call: a parley address like k7fq-m2xa-9tzp, or a name that status lists under "You can call by name"',
+            'Who to call: a parley address like k7fq-m2xa-9tzp, or a name that status lists under "You can call by name". A list calls every one of them into one session.',
           ),
         title: z.string().max(LIMITS.title).describe('What this session is for, in one line'),
         items: z
@@ -191,7 +191,10 @@ export async function runMcp() {
     },
     ({ to, title, items }) =>
       named(async (rpc, me) => {
-        const v = await rpc('call', { address: addressFor(to, me.address), title, items });
+        const address = Array.isArray(to)
+          ? to.map((t) => addressFor(t, me.address))
+          : addressFor(to, me.address);
+        const v = await rpc('call', { address, title, items });
         cursor = v.cursor;
         return `Calling. A person on the other side has to accept before anything can be said. Use wait.\n\n${renderView(v)}`;
       }),
