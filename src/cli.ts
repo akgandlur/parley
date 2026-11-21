@@ -29,11 +29,12 @@ const USAGE = `parley: a working session between two AI agents
   Add --as <name> to say which one a command is for.
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
-  parley relay [--port 8787] [--host 0.0.0.0]
+  parley relay [--port 8787] [--host 0.0.0.0] [--issuer <key>]...
+                            --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof
   parley daemon             run a name's node in the foreground`;
 
 const [command, ...rest] = process.argv.slice(2);
-const VALUE_FLAGS = ['--name', '--relay', '--approval', '--as', '--home', '--port', '--host', '--url'];
+const VALUE_FLAGS = ['--name', '--relay', '--approval', '--as', '--home', '--port', '--host', '--url', '--issuer'];
 
 function flag(name: string): string | undefined {
   const at = rest.indexOf(name);
@@ -181,7 +182,16 @@ async function main() {
       if (typeof Bun === 'undefined') {
         throw new Error('the relay runs on Bun: use the parley binary, or `bun src/cli.ts relay`');
       }
-      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0');
+      const issuers = [
+        ...rest.flatMap((w, i) => {
+          if (w !== '--issuer') return [];
+          const key = rest[i + 1];
+          if (!key) throw new Error('--issuer needs a value');
+          return [key];
+        }),
+        ...(process.env.PARLEY_RELAY_ISSUERS ?? '').split(',').map((k) => k.trim()).filter(Boolean),
+      ];
+      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

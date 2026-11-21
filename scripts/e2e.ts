@@ -2,7 +2,7 @@
 // both agents and both people; nothing here calls a model.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -19,6 +19,7 @@ import {
   verifyText,
   type Identity,
 } from '../src/crypto';
+import { makeAttestation } from '../src/attest';
 import { readJson, writeJson, type Config, type Contact } from '../src/home';
 import { request, type NodeInfo } from '../src/ipc';
 import { RELAY_AUTH, startRelay } from '../src/relay';
@@ -1202,6 +1203,140 @@ async function groupDialDropouts() {
   await lee.until('ended');
 }
 
+type Link = { ws: WebSocket; ready: boolean; closed?: { code: number; reason: string } };
+
+function dialRelay(url: string, id: Identity, att?: string, forwardedFor?: string): Promise<Link> {
+  const options: Bun.WebSocketOptions = forwardedFor ? { headers: { 'x-forwarded-for': forwardedFor } } : {};
+  // The DOM typing of WebSocket shadows Bun's, which takes headers.
+  const ws = new WebSocket(url, options as unknown as string[]);
+  const link: Link = { ws, ready: false };
+  return new Promise((resolve) => {
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(String(ev.data));
+      if (msg.t === 'challenge') {
+        ws.send(JSON.stringify({ t: 'hello', publicKey: id.publicKey, sig: signText(id, RELAY_AUTH + msg.nonce), ...(att ? { att } : {}) }));
+      } else if (msg.t === 'ready') {
+        link.ready = true;
+        resolve(link);
+      }
+    };
+    ws.onclose = (ev) => {
+      link.closed = { code: ev.code, reason: ev.reason };
+      resolve(link);
+    };
+  });
+}
+
+async function closedWithin(link: Link, ms: number) {
+  for (const deadline = Date.now() + ms; Date.now() < deadline && !link.closed; await Bun.sleep(50));
+  return link.closed;
+}
+
+async function accountRelays() {
+  console.log('\n# a relay that admits only names with an account proof');
+  const issuer = newIdentity('Test cloud');
+  const stranger = newIdentity('Other cloud');
+  const now = () => Math.floor(Date.now() / 1000);
+  const proof = (id: Identity, sub = 'acct-1', exp = now() + 86400, by = issuer) =>
+    makeAttestation(by, { key: id.publicKey, sub, domain: 'example.com', kind: 'account', iat: now(), exp });
+  const gated = startRelay(0, '127.0.0.1', { issuers: [issuer.publicKey] });
+  const url = `ws://127.0.0.1:${gated.port}`;
+  const opened: Link[] = [];
+  const keep = (l: Link) => (opened.push(l), l);
+  const shut = async (links: Link[]) => {
+    for (const l of links) l.ws.close();
+    for (const l of links) await closedWithin(l, 2000);
+  };
+  try {
+    const plain = keep(await dialRelay(relayUrl, newIdentity('Plain')));
+    const ignored = keep(await dialRelay(relayUrl, newIdentity('Odd'), 'not.a-proof'));
+    check('a relay with no issuers lets in a name without a proof, and ignores a bad one', plain.ready && ignored.ready, [plain.closed, ignored.closed]);
+
+    const me = newIdentity('Verified');
+    const refusals: [string, Link][] = [
+      ['no proof', await dialRelay(url, me)],
+      ['a malformed proof', await dialRelay(url, me, 'garbage')],
+      ['a proof from an unknown cloud', await dialRelay(url, me, proof(me, 'acct-1', now() + 86400, stranger))],
+      ['an expired proof', await dialRelay(url, me, proof(me, 'acct-1', now() - 1))],
+      ['a proof for another key', await dialRelay(url, me, proof(newIdentity('Someone else')))],
+    ];
+    for (const [what, l] of refusals) {
+      check(`${what} is refused with 4003 and a reason`, !l.ready && l.closed?.code === 4003 && l.closed.reason.startsWith('this relay needs a parley account') === (what === 'no proof') && l.closed.reason.length > 10, l.closed);
+    }
+    check('the reasons say what is wrong', refusals[2]![1].closed?.reason === 'the account proof is not from a known parley cloud' && refusals[3]![1].closed?.reason === 'the account proof has expired' && refusals[4]![1].closed?.reason === 'the account proof is for another key', refusals.map(([, l]) => l.closed?.reason));
+    const good = keep(await dialRelay(url, me, proof(me)));
+    check('a valid proof connects', good.ready, good.closed);
+    await shut([good]);
+
+    const brief = newIdentity('Brief');
+    const renewed = keep(await dialRelay(url, brief, proof(brief, 'acct-1', now() + 2)));
+    const lapse = newIdentity('Lapse');
+    const expiring = keep(await dialRelay(url, lapse, proof(lapse, 'acct-1', now() + 2)));
+    renewed.ws.send(JSON.stringify({ t: 'renew', att: proof(brief, 'acct-1', now() + 5) }));
+    const ended = await closedWithin(expiring, 4000);
+    check('a connection whose proof expires is closed with 4003', ended?.code === 4003 && ended.reason === 'the account proof has expired', ended);
+    check('a renewed connection outlives its first proof', renewed.ready && !renewed.closed, renewed.closed);
+    const later = await closedWithin(renewed, 4000);
+    check('and is closed when the renewed proof expires', later?.code === 4003 && later.reason === 'the account proof has expired', later);
+
+    const crowd: Link[] = [];
+    for (let i = 0; i < 20; i++) {
+      const id = newIdentity(`Crowd ${i}`);
+      crowd.push(keep(await dialRelay(url, id, proof(id, `crowd-${i}`), '10.0.0.1, 203.0.113.7')));
+    }
+    const extra = newIdentity('One too many');
+    const over = keep(await dialRelay(url, extra, proof(extra, 'crowd-x'), '203.0.113.7'));
+    const elsewhere = keep(await dialRelay(url, extra, proof(extra, 'crowd-x'), '203.0.113.7, 198.51.100.9'));
+    check('twenty connections from one IP are let in', crowd.every((l) => l.ready), crowd.map((l) => l.closed));
+    check('the 21st from that IP is closed with 4029', !over.ready && over.closed?.code === 4029, over.closed);
+    check('behind a loopback proxy, the last X-Forwarded-For hop is the IP', elsewhere.ready, elsewhere.closed);
+    await shut([crowd[0]!]);
+    const again = keep(await dialRelay(url, newIdentity('Back'), undefined, '203.0.113.7'));
+    check('a closed connection frees its place', again.closed?.code === 4003 && again.closed.reason.startsWith('this relay needs'), again.closed);
+    await shut([...crowd, elsewhere]);
+
+    const lan = Object.values(networkInterfaces()).flat().find((n) => n && n.family === 'IPv4' && !n.internal)?.address;
+    if (!lan) throw new Error('this machine has no non-loopback IPv4 address to test a direct peer on');
+    const direct = startRelay(0, lan, { issuers: [issuer.publicKey] });
+    try {
+      const spoofed: Link[] = [];
+      for (let i = 0; i < 21; i++) {
+        const id = newIdentity(`Spoof ${i}`);
+        spoofed.push(keep(await dialRelay(`ws://${lan}:${direct.port}`, id, proof(id, `spoof-${i}`), `192.0.2.${i}`)));
+      }
+      check('from a peer that is not loopback, X-Forwarded-For is ignored', spoofed.slice(0, 20).every((l) => l.ready) && spoofed[20]!.closed?.code === 4029, spoofed.map((l) => l.closed?.code));
+      await shut(spoofed);
+    } finally {
+      direct.stop(true);
+    }
+
+    const team: Link[] = [];
+    for (let i = 0; i < 51; i++) {
+      const id = newIdentity(`Team ${i}`);
+      team.push(keep(await dialRelay(url, id, proof(id, 'big-account'), `198.51.100.${Math.floor(i / 10)}`)));
+    }
+    check('fifty connections of one account are let in', team.slice(0, 50).every((l) => l.ready), team.map((l) => l.closed?.code));
+    check('the 51st is closed with 4029', team[50]!.closed?.code === 4029, team[50]!.closed);
+    await shut([team[0]!]);
+    const rejoin = newIdentity('Team again');
+    const back = keep(await dialRelay(url, rejoin, proof(rejoin, 'big-account'), '198.51.100.99'));
+    check('a closed connection frees its account place', back.ready, back.closed);
+    await shut([...team, back]);
+
+    const flood = keep(await dialRelay(relayUrl, newIdentity('Flood')));
+    const chunk = JSON.stringify({ t: 'send', to: 'nobody', ref: 'x', payload: 'a'.repeat(200_000) });
+    for (let i = 0; i < 25 && !flood.closed; i++) {
+      flood.ws.send(chunk);
+      await Bun.sleep(20);
+    }
+    const flooded = await closedWithin(flood, 2000);
+    check('more than 4 MB in 10 s is closed with 4029, even on an open relay', flooded?.code === 4029, flooded);
+  } finally {
+    for (const l of opened) l.ws.close();
+    gated.stop(true);
+  }
+}
+
 const dave = new Peer('Dave');
 const extras: Peer[] = [dave];
 
@@ -1227,6 +1362,7 @@ try {
   await groupThroughTools();
   await groupLosesSide();
   await groupDialDropouts();
+  await accountRelays();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.message : err);
