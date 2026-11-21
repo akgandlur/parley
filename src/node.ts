@@ -1,9 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, type AddressInfo } from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { z } from 'zod';
+import VIEWER from './viewer.html' with { type: 'text' };
 import {
   addressOf,
   deriveSessionKeys,
@@ -18,13 +20,18 @@ import {
   type SessionKeys,
 } from './crypto';
 import {
-  HOME,
+  holder,
+  isSavedKey,
   loadConfig,
   loadContacts,
   loadIdentity,
+  saveContact,
   writeJson,
+  type Config,
 } from './home';
+import { startCloud } from './cloud';
 import { request } from './ipc';
+import { openInBrowser } from './open';
 import { renderMinutes } from './render';
 import { RELAY_AUTH } from './relay';
 import {
@@ -32,11 +39,13 @@ import {
   ControlSchema,
   EntrySchema,
   LIMITS,
+  VERSION,
   type Control,
   type Entry,
   type EntryBody,
   type Ev,
   type EvBody,
+  type FeedEntry,
   type SessionState,
   type View,
   type WaitResult,
@@ -72,6 +81,7 @@ type Session = {
   state: SessionState;
   peer: { address: string; publicKey?: string; name?: string };
   knownSince?: string;
+  savedAs?: string;
   eph: Ephemeral;
   keys?: SessionKeys;
   sendSeq: number;
@@ -90,6 +100,7 @@ type Session = {
   endReason?: string;
   endedAt?: number;
   dialog?: ChildProcess;
+  answerIn?: Config['approval'];
 };
 
 class ProtocolError extends Error {}
@@ -122,19 +133,22 @@ const newItem = (id: string, title: string, addedBy: Item['addedBy']): Item => (
   proposals: new Map(),
 });
 
-export async function runNode() {
+export async function runNode(home: string) {
   if (typeof WebSocket === 'undefined') {
     throw new Error('parley needs Node 22 or newer (or Bun)');
   }
-  const me = loadIdentity();
-  const config = loadConfig();
+  const me = loadIdentity(home);
+  const config = loadConfig(home);
   // The plugin sets PARLEY_RELAY, and it wins over the saved address so a
   // plugin update can move everyone to a new relay.
   const relayUrl = process.env.PARLEY_RELAY ?? config.relay;
   const address = addressOf(me.publicKey);
-  const contacts = loadContacts();
   const token = randomBytes(24).toString('base64url');
   const events: Ev[] = [];
+  const feed: FeedEntry[] = [];
+  const viewToken = randomBytes(18).toString('base64url');
+  let feedCounter = 0;
+  let viewerUrl = '';
   const waiters = new Set<() => void>();
   const outbox: string[] = [];
   let counter = 0;
@@ -147,13 +161,29 @@ export async function runNode() {
   const relayFirstAnswer = new Promise<void>((resolve) => (relayAnswered = resolve));
 
   try {
-    await request('ping', {}, { start: false, timeoutMs: 2000 });
-    throw new Error(`a parley node is already running for ${HOME}`);
+    await request('ping', {}, { home, start: false, timeoutMs: 2000 });
+    throw new Error(`a parley node is already running for "${me.name}" (${home})`);
   } catch (err) {
     if (explain(err).includes('already running')) throw err;
   }
 
+  const cloud = startCloud(home, me, log, () => {
+    const s = current;
+    return (
+      s && {
+        id: s.id,
+        dir: s.dir,
+        role: s.role,
+        state: s.state,
+        peer: { address: s.peer.address, name: s.peer.name },
+        title: s.title,
+        endedReason: s.state === 'ended' ? s.endReason : undefined,
+      }
+    );
+  });
+
   function emit(ev: EvBody) {
+    cloud.touch();
     events.push({ ...ev, n: ++counter } as Ev);
     for (const wake of [...waiters]) wake();
   }
@@ -273,6 +303,11 @@ export async function runNode() {
 
     if (c.kind === 'ring') {
       if (!c.eph) return;
+      if (!isSavedKey(from, key)) {
+        log(`refused a call from ${from}: not the key saved for that contact`);
+        emit({ kind: 'impostor', address: from });
+        return;
+      }
       if (s && s.state !== 'ended') {
         sendControl(from, 'busy', c.session);
         return;
@@ -294,6 +329,9 @@ export async function runNode() {
       from !== s.peer.address
     ) {
       return;
+    }
+    if (!isSavedKey(from, key)) {
+      return end(s, 'the answer did not come from the key saved for this contact, so this is not the contact you know');
     }
     if (c.kind === 'busy') return end(s, 'the other side is in another session');
     if (!c.eph) return;
@@ -357,16 +395,19 @@ export async function runNode() {
 
   function startSession(id: string, role: Role, peerAddress: string): Session {
     events.length = 0;
+    feed.length = 0;
     const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
-    const dir = join(HOME, 'sessions', `${stamp}-${id}`);
+    const dir = join(home, 'sessions', `${stamp}-${id}`);
     mkdirSync(dir, { recursive: true });
+    const known = loadContacts()[peerAddress];
     current = {
       id,
       dir,
       role,
       state: 'dialing',
       peer: { address: peerAddress },
-      knownSince: contacts[peerAddress]?.firstSeen,
+      knownSince: known?.firstSeen,
+      savedAs: known?.name,
       eph: newEphemeral(),
       sendSeq: 0,
       recvSeq: 0,
@@ -400,6 +441,7 @@ export async function runNode() {
       join(s.dir, 'transcript.jsonl'),
       JSON.stringify({ raw, sig }) + '\n',
     );
+    cloud.touch();
   }
 
   function sendEntry(s: Session, body: EntryBody) {
@@ -435,6 +477,18 @@ export async function runNode() {
     const authorRole: Role =
       by === 'me' ? s.role : s.role === 'caller' ? 'callee' : 'caller';
     const lead = authorRole === 'caller' ? 'a' : 'b';
+    // Before the entry takes effect: an entry that ends the agenda sends a
+    // hangup from inside this call, and the feed has to show them in order.
+    feed.push({
+      n: ++feedCounter,
+      by,
+      at: e.at,
+      type: e.type,
+      item: 'item' in e ? e.item : e.type === 'add_item' ? e.id : undefined,
+      text:
+        'text' in e ? e.text : 'reason' in e ? e.reason : 'title' in e ? e.title : undefined,
+      ref: e.type === 'propose' ? `${lead}:${e.seq}` : 'ref' in e ? e.ref : undefined,
+    });
 
     switch (e.type) {
       case 'call':
@@ -448,6 +502,7 @@ export async function runNode() {
         s.state = 'awaiting_approval';
         if (by === 'peer') {
           s.peer.name = e.name;
+          s.answerIn = config.approval;
           emit({ kind: 'incoming' });
           void promptForApproval(s);
         }
@@ -460,8 +515,13 @@ export async function runNode() {
         if (by === 'peer') s.peer.name = e.name;
         s.state = 'active';
         s.activeSince = Date.now();
-        rememberContact(s);
+        if (s.peer.name && s.peer.publicKey) {
+          saveContact(s.peer.address, s.peer.name, s.peer.publicKey);
+        }
         emit({ kind: 'opened' });
+        if (config.openViewer) {
+          openInBrowser(viewerUrl, (why) => log('could not open the live view:', why));
+        }
         return;
       case 'decline':
         expect(
@@ -544,15 +604,6 @@ export async function runNode() {
     }
   }
 
-  function rememberContact(s: Session) {
-    if (contacts[s.peer.address] || !s.peer.name) return;
-    contacts[s.peer.address] = {
-      name: s.peer.name,
-      firstSeen: new Date().toISOString(),
-    };
-    writeJson(HOME, 'contacts.json', contacts);
-  }
-
   function end(s: Session, reason: string) {
     if (s.state === 'ended') return;
     s.state = 'ended';
@@ -595,10 +646,11 @@ export async function runNode() {
   }
 
   async function promptForApproval(s: Session) {
-    if (config.approval !== 'dialog') return;
+    if (s.answerIn !== 'dialog') return;
     const clean = (t: string) => t.replace(/[\u0000-\u001f\u007f]/g, ' ');
+    const held = holder(address);
     const text = [
-      `${clean(s.peer.name ?? 'Someone')} is calling your Claude.`,
+      `${clean(s.peer.name ?? 'Someone')} is calling "${clean(me.name)}", one of your Claude Code sessions.`,
       `Address: ${s.peer.address}`,
       s.knownSince
         ? `You first connected to this address on ${s.knownSince.slice(0, 10)}.`
@@ -607,7 +659,9 @@ export async function runNode() {
       `Agenda: ${clean(s.title)}`,
       ...s.items.map((i) => `  • ${clean(i.title)}`),
       '',
-      'If you accept, tell your Claude to join the parley call.',
+      held
+        ? `If you accept, go to that session (in ${clean(held.dir)}) and tell it: join the parley call.`
+        : `No open session has this name. If you accept, tell any Claude Code session: join the parley call as ${clean(me.name)}.`,
     ].join('\n');
     const quoted = `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     const proc = spawn(
@@ -623,8 +677,12 @@ export async function runNode() {
     let err = '';
     proc.stdout.on('data', (chunk) => (out += chunk));
     proc.stderr.on('data', (chunk) => (err += chunk));
+    let killed = false;
     await new Promise<void>((resolve) => {
-      proc.on('close', () => resolve());
+      proc.on('close', (code) => {
+        killed = code === null;
+        resolve();
+      });
       proc.on('error', (spawnErr) => {
         err += spawnErr.message;
         resolve();
@@ -634,18 +692,26 @@ export async function runNode() {
     if (out.includes('button returned:Accept')) decide(s, true);
     else if (out.includes('button returned:Decline')) decide(s, false);
     else if (out.includes('gave up:true')) decide(s, false, 'nobody answered');
+    // Only the window can accept this call, so a program that closes the
+    // window must not be handed the terminal instead.
+    else if (killed) decide(s, false, 'the approval window was closed without an answer');
     // A dialog that could not be shown is not a decline. The call stays
     // waiting so the person can still answer with `parley accept`.
-    else log('the approval dialog failed; answer in a terminal:', err.trim());
+    else {
+      s.answerIn = 'terminal';
+      log('the approval dialog failed; answer in a terminal:', err.trim());
+    }
   }
 
   function view(): View {
     const s = current;
     return {
       cursor: counter,
-      approval: config.approval,
+      approval: s?.answerIn ?? config.approval,
+      viewer: viewerUrl,
       me: { name: me.name, address },
       relay: { url: relayUrl, connected: relayReady, error: relayError },
+      cloud: cloud.state(),
       session: s && {
         id: s.id,
         role: s.role,
@@ -654,6 +720,7 @@ export async function runNode() {
           address: s.peer.address,
           name: s.peer.name,
           knownSince: s.knownSince,
+          savedAs: s.savedAs,
         },
         title: s.title,
         items: s.items.map((i) => ({
@@ -821,12 +888,20 @@ export async function runNode() {
       if (!s || s.role !== 'callee' || s.state !== 'awaiting_approval') {
         throw new Error('no call is waiting for an answer');
       }
+      if (a.accept && s.answerIn === 'dialog') {
+        throw new Error('this call is accepted in the window on this machine, by the person looking at it');
+      }
       decide(s, a.accept, a.reason);
+      return view();
+    },
+    cloud_link: (args) => cloud.link(ArgSchemas.cloud_link.parse(args).url),
+    cloud_unlink: () => {
+      cloud.unlink();
       return view();
     },
     stop: () => {
       setTimeout(() => {
-        rmSync(join(HOME, 'node.json'), { force: true });
+        rmSync(join(home, 'node.json'), { force: true });
         process.exit(0);
       }, 50);
       return 'stopping';
@@ -859,9 +934,40 @@ export async function runNode() {
     });
   });
 
+  // The live view. Read-only, loopback only, and behind a token in the path
+  // so another page in the same browser cannot read a session.
+  const viewer = createHttpServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const base = `/${viewToken}/`;
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (!/^(127\.0\.0\.1|localhost):\d+$/.test(req.headers.host ?? '')) {
+      res.writeHead(403).end();
+    } else if (req.method !== 'GET' || !url.pathname.startsWith(base)) {
+      res.writeHead(404).end();
+    } else if (url.pathname === base) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:",
+      );
+      res.end(VIEWER);
+    } else if (url.pathname === `${base}state`) {
+      const after = Number(url.searchParams.get('after')) || 0;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ view: view(), feed: feed.filter((f) => f.n > after) }));
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+
+  await new Promise<void>((resolve) => viewer.listen(0, '127.0.0.1', resolve));
+  viewerUrl = `http://127.0.0.1:${(viewer.address() as AddressInfo).port}/${viewToken}/`;
+
   server.listen(0, '127.0.0.1', () => {
     const { port } = server.address() as AddressInfo;
-    writeJson(HOME, 'node.json', { port, token, pid: process.pid }, true);
+    writeJson(home, 'node.json', { port, token, pid: process.pid, version: VERSION }, true);
     log(`parley node for ${me.name} (${address}) listening on ${port}`);
   });
 

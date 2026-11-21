@@ -60,6 +60,13 @@ export function normalizeAddress(input: string): string {
   return `${bare.slice(0, 4)}-${bare.slice(4, 8)}-${bare.slice(8)}`;
 }
 
+const ADDRESS = new RegExp(
+  `^[${ALPHABET}]{4}[- ]?[${ALPHABET}]{4}[- ]?[${ALPHABET}]{4}$`,
+  'i',
+);
+
+export const isAddress = (input: string) => ADDRESS.test(input.trim());
+
 export function signText(id: Identity, text: string): string {
   const key = createPrivateKey({
     key: { kty: 'OKP', crv: 'Ed25519', x: id.publicKey, d: id.privateKey },

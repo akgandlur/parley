@@ -1,18 +1,16 @@
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { addressOf, newIdentity } from './crypto';
-import { HOME, loadIdentity, writeJson, type Config } from './home';
-
-export const isSetUp = () => existsSync(join(HOME, 'identity.json'));
+import { ROOT, locals, sameName, writeJson, type Config, type Local } from './home';
 
 export function setUp(
   name: string,
   relay: string,
   approval: string = process.platform === 'darwin' ? 'dialog' : 'terminal',
-): { name: string; address: string } {
-  if (isSetUp()) {
+): Local {
+  const taken = locals().find((l) => sameName(l.name, name));
+  if (taken) {
     throw new Error(
-      `${HOME} already has an identity (${addressOf(loadIdentity().publicKey)}). Delete that folder to start over; the address changes with it.`,
+      `this machine already has the parley name "${taken.name}" (${taken.address})`,
     );
   }
   if (!/^wss?:\/\//.test(relay)) {
@@ -27,10 +25,13 @@ export function setUp(
   const config: Config = {
     relay,
     approval,
+    openViewer: approval === 'dialog',
     limits: { idleMinutes: 15, maxMinutes: 120, maxEntries: 400 },
   };
-  const identity = newIdentity(name);
-  writeJson(HOME, 'identity.json', identity, true);
-  writeJson(HOME, 'config.json', config);
-  return { name, address: addressOf(identity.publicKey) };
+  const identity = newIdentity(name.trim());
+  const address = addressOf(identity.publicKey);
+  const home = join(ROOT, 'ids', address);
+  writeJson(home, 'identity.json', identity, true);
+  writeJson(home, 'config.json', config);
+  return { home, name: identity.name, address };
 }

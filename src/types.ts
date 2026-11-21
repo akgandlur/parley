@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const VERSION = '0.2.0';
+
 export type Who = 'me' | 'peer';
 
 export const LIMITS = {
@@ -77,6 +79,7 @@ export const ArgSchemas = {
   drop: z.object({ item, reason }),
   hangup: z.object({ reason }),
   approve: z.object({ accept: z.boolean(), reason: reason.optional() }),
+  cloud_link: z.object({ url: z.string().max(500).optional() }),
 };
 
 export type SessionState =
@@ -104,18 +107,32 @@ export type SessionView = {
   id: string;
   role: 'caller' | 'callee';
   state: SessionState;
-  peer: { address: string; name?: string; knownSince?: string };
+  peer: { address: string; name?: string; knownSince?: string; savedAs?: string };
+  // Set on the copy an agent is given of a call nobody has accepted yet.
+  withheld?: true;
   title: string;
   items: ItemView[];
   endedReason?: string;
   minutes?: string;
 };
 
+export type FeedEntry = {
+  n: number;
+  by: Who;
+  at: string;
+  type: Entry['type'];
+  item?: string;
+  text?: string;
+  ref?: string;
+};
+
 export type View = {
   cursor: number;
   approval: 'dialog' | 'terminal';
+  viewer: string;
   me: { name: string; address: string };
   relay: { url: string; connected: boolean; error?: string };
+  cloud?: { url: string; syncing: boolean; error?: string };
   session?: SessionView;
 };
 
@@ -123,6 +140,7 @@ export type Ev = { n: number } & (
   | { kind: 'incoming' }
   | { kind: 'opened' }
   | { kind: 'ended'; reason: string }
+  | { kind: 'impostor'; address: string }
   | { kind: 'say'; item: string; text: string }
   | { kind: 'add_item'; item: string; title: string }
   | { kind: 'propose'; item: string; ref: string; text: string }

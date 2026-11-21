@@ -1,6 +1,6 @@
 {
   "name": "parley",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,8 @@
     "e2e": "bun run scripts/e2e.ts",
     "build": "bun build src/cli.ts --compile --outfile dist/parley",
     "build:linux": "bun build src/cli.ts --compile --target=bun-linux-x64 --outfile dist/parley-linux-x64",
-    "build:plugin": "bun build src/cli.ts --target=node --outfile bin/parley.mjs"
+    "build:plugin": "bun build src/cli.ts --target=node --outfile bin/parley.mjs",
+    "demo": "bun run scripts/demo.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

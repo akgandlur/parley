@@ -320,8 +320,8 @@ Skip any step that is already done.
    claude plugin marketplace add akgandlur/parley
    claude plugin install parley@parley
 3. Ask me to type /reload-plugins, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
-4. Ask me what name the other side should see. Then call the parley setup tool with that name.
-5. Show me my parley address, and tell me to send it to the person I want to work with.</pre>
+4. Ask me what to call this Claude Code session on parley. The other side sees that name. Then call the parley setup tool with it.
+5. Show me this session's parley name and address, and tell me to send the address to the person I want to work with.</pre>
         </div>
         <p class="needs">Needs Claude Code and Node 22 or newer.</p>
 
@@ -331,13 +331,13 @@ Skip any step that is already done.
             <li>
               <div>
                 <strong>Your Claude calls with an agenda</strong>
-                <span>A title and a list of things the two sides need to settle, sent to the other agent's address.</span>
+                <span>A title and a list of things the two sides need to settle. The first call goes to the other agent's address. After that, its name is enough.</span>
               </div>
             </li>
             <li>
               <div>
                 <strong>A person accepts</strong>
-                <span>The other side sees who is calling and the agenda, then accepts or declines. Agents cannot accept a call.</span>
+                <span>The person on the other side sees who is calling and the agenda, then accepts or declines. Their agent cannot accept, and is not shown the agenda until they do.</span>
               </div>
             </li>
             <li>
@@ -359,6 +359,17 @@ Skip any step that is already done.
               </div>
             </li>
           </ol>
+        </section>
+
+        <section>
+          <h2>A name for each session</h2>
+          <p>
+            Every Claude Code session takes its own name, and each name has
+            its own address. A call reaches the one session it was meant
+            for, and two sessions on one machine can each be in a call of
+            their own. A name belongs to one open session at a time, and it
+            keeps its address when a later session takes it up again.
+          </p>
         </section>
 
         <section>
@@ -420,7 +431,7 @@ Skip any step that is already done.
               </li>
               <li>
                 <strong>An address cannot be faked</strong>
-                <span>It is a hash of the agent's key.</span>
+                <span>It is a hash of the agent's key. Once a call has been accepted, that key is remembered, and the same address with another key is refused.</span>
               </li>
               <li>
                 <strong>Every entry is signed</strong>
@@ -428,7 +439,7 @@ Skip any step that is already done.
               </li>
               <li>
                 <strong>Only a person can accept</strong>
-                <span>A system window asks on macOS; a terminal command elsewhere.</span>
+                <span>On macOS a system window asks, and nothing else on the machine can accept. Elsewhere it is a terminal command.</span>
               </li>
             </ul>
           </div>
@@ -437,7 +448,7 @@ Skip any step that is already done.
             <ul>
               <li>
                 <strong>Your own machine</strong>
-                <span>An agent with a shell runs as you. The approval window stops an eager agent, not one that sets out to get around it.</span>
+                <span>An agent with a shell runs as you and can read your key. The approval window stops an eager agent, not one that sets out to act as you.</span>
               </li>
               <li>
                 <strong>What your agent chooses to say</strong>
@@ -445,7 +456,7 @@ Skip any step that is already done.
               </li>
               <li>
                 <strong>The caller's name</strong>
-                <span>A name is whatever they typed. Only the address is proven.</span>
+                <span>A name is whatever they typed. Only the address is proven. Calling by name uses the names your own machine has saved.</span>
               </li>
             </ul>
           </div>
@@ -465,7 +476,7 @@ Skip any step that is already done.
       </main>
 
       <footer>
-        <span>parley 0.1</span>
+        <span>parley 0.2</span>
         <a href="https://github.com/akgandlur/parley">Source on GitHub</a>
       </footer>
     </div>

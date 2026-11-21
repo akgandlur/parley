@@ -10,7 +10,28 @@ const STATE_TEXT: Record<SessionView['state'], string> = {
 };
 
 const who = (s: SessionView) =>
-  `${s.peer.name ? `"${s.peer.name}"` : 'an unnamed caller'} (${s.peer.address})`;
+  `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? 'a new caller' : 'an unnamed caller'} (${s.peer.address})`;
+
+// Until a person accepts, the caller's name and agenda are a stranger's
+// words: anyone who has the address can ring. The person is shown them
+// where they answer. The agent gets the address and, for a contact, the
+// name saved when an earlier call was accepted.
+export function forAgent(v: View): View {
+  const s = v.session;
+  if (s?.role !== 'callee' || (s.state !== 'ringing' && s.state !== 'awaiting_approval')) {
+    return v;
+  }
+  return {
+    ...v,
+    session: {
+      ...s,
+      withheld: true,
+      title: '',
+      items: [],
+      peer: { ...s.peer, name: s.peer.savedAs },
+    },
+  };
+}
 
 function renderItem(i: ItemView): string {
   const lines = [`  ${i.id} [${i.state}] ${i.title}`];
@@ -23,10 +44,24 @@ function renderItem(i: ItemView): string {
   return lines.join('\n');
 }
 
+export const renderCall = (s: SessionView | undefined) =>
+  !s || s.state === 'ended'
+    ? 'no call'
+    : `session with ${who(s)}, ${STATE_TEXT[s.state]}`;
+
 export function renderView(v: View): string {
   const lines = [
     `You are "${v.me.name}" at ${v.me.address}. Relay ${v.relay.connected ? 'connected' : `NOT connected${v.relay.error ? `: ${v.relay.error}` : ''}`} (${v.relay.url}).`,
   ];
+  // A node from before the live view existed can still be finishing a call.
+  if (v.viewer) lines.push(`Live view for your user: ${v.viewer}`);
+  if (v.cloud) {
+    lines.push(
+      v.cloud.syncing
+        ? `Cloud: this name's sessions are sent to ${v.cloud.url}.`
+        : `Cloud: NOT reaching ${v.cloud.url}: ${v.cloud.error}`,
+    );
+  }
   const s = v.session;
   if (!s) return [...lines, 'No session.'].join('\n');
   lines.push(
@@ -37,6 +72,11 @@ export function renderView(v: View): string {
       s.peer.knownSince
         ? `First connected to this address on ${s.peer.knownSince.slice(0, 10)}.`
         : 'This address has not connected here before.',
+    );
+  }
+  if (s.withheld) {
+    lines.push(
+      'What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.',
     );
   }
   if (s.title) lines.push(`Agenda: ${s.title}`, ...s.items.map(renderItem));
@@ -55,6 +95,8 @@ export function renderEvent(e: Ev, v: View): string {
       return 'The session is open.';
     case 'ended':
       return `The session ended: ${e.reason}.`;
+    case 'impostor':
+      return `A call from ${e.address} was refused. That address is one of your contacts, but the caller did not hold the key saved for it, so it is not that contact. Tell your user.`;
     case 'say':
       return `[${e.item}] they said: ${e.text}`;
     case 'add_item':

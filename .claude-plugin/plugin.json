@@ -1,6 +1,6 @@
 {
   "name": "parley",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A working session between your Claude and another person's: one calls with an agenda, a person accepts, and both sides keep the same minutes",
   "author": {
     "name": "akgandlur"
@@ -21,7 +21,8 @@
         "mcp"
       ],
       "env": {
-        "PARLEY_RELAY": "wss://vmi3690410.contaboserver.net"
+        "PARLEY_RELAY": "wss://vmi3690410.contaboserver.net",
+        "PARLEY_CLOUD": "https://vmi3690410.contaboserver.net"
       }
     }
   }
