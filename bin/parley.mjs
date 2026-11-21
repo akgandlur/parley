@@ -13443,13 +13443,15 @@ var LIMITS = {
   reason: 500,
   text: 20000,
   itemsAtCall: 20,
-  itemsTotal: 50
+  itemsTotal: 50,
+  sides: 8
 };
 var name = string2().min(1).max(LIMITS.name);
 var title = string2().min(1).max(LIMITS.title);
 var reason = string2().max(LIMITS.reason);
 var text = string2().min(1).max(LIMITS.text);
 var item = string2().min(1).max(12);
+var side = string2().regex(/^[a-h]$/);
 var signedBase = {
   session: string2(),
   seq: number2().int().nonnegative(),
@@ -13462,7 +13464,8 @@ var EntrySchema = discriminatedUnion("type", [
     type: literal("call"),
     name,
     title,
-    items: array(title).min(1).max(LIMITS.itemsAtCall)
+    items: array(title).min(1).max(LIMITS.itemsAtCall),
+    roster: array(object({ id: side, address: string2(), key: string2().max(100) })).min(3).max(LIMITS.sides).optional()
   }),
   object({ ...signedBase, type: literal("accept"), name }),
   object({ ...signedBase, type: literal("decline"), reason }),
@@ -13478,11 +13481,12 @@ var ControlSchema = object({
   session: string2().regex(/^[0-9a-f]{16}$/),
   to: string2(),
   at: string2(),
-  eph: string2().optional()
+  eph: string2().optional(),
+  group: literal(1).optional()
 });
 var ArgSchemas = {
   call: object({
-    address: string2(),
+    address: union([string2(), array(string2()).min(1).max(LIMITS.sides - 1)]),
     title,
     items: array(title).min(1).max(LIMITS.itemsAtCall)
   }),
@@ -22227,7 +22231,12 @@ var STATE_TEXT = {
   closing: "ending",
   ended: "ended"
 };
-var who = (s) => `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address})`;
+var label = (x) => `${x.name ? `"${x.name}"` : "an unnamed side"} (${x.id}, ${x.address})${x.left ? `, who left: ${x.left}` : ""}`;
+var who = (s) => s.sides ? s.sides.filter((x) => !x.you).map(label).join(", ") : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address})`;
+var sideName = (s, id) => {
+  const x = s.sides?.find((y) => y.id === id);
+  return x?.you ? "you" : `${x?.name ?? x?.address ?? "unknown"} (${id})`;
+};
 function forAgent(v) {
   const s = v.session;
   if (s?.role !== "callee" || s.state !== "ringing" && s.state !== "awaiting_approval") {
@@ -22240,14 +22249,19 @@ function forAgent(v) {
       withheld: true,
       title: "",
       items: [],
-      peer: { ...s.peer, name: s.peer.savedAs }
+      peer: { ...s.peer, name: s.peer.savedAs },
+      sides: s.sides?.map((x) => x.you ? x : { ...x, name: x.savedAs })
     }
   };
 }
-function renderItem(i) {
+function renderItem(i, s) {
   const lines = [`  ${i.id} [${i.state}] ${i.title}`];
   if (i.agreed)
     lines.push(`      agreed: ${i.agreed.text}`);
+  for (const o of i.others ?? []) {
+    const agreed = o.agreedBy.map((id) => sideName(s, id));
+    lines.push(`      ${sideName(s, o.by)} proposes (${o.ref}): ${o.text}${agreed.length ? ` [agreed by ${agreed.join(", ")}]` : ""}`);
+  }
   if (i.state === "dropped")
     lines.push(`      dropped: ${i.dropReason}`);
   if (i.theirs) {
@@ -22280,7 +22294,7 @@ function renderView(v) {
     lines.push("What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.");
   }
   if (s.title)
-    lines.push(`Agenda: ${s.title}`, ...s.items.map(renderItem));
+    lines.push(`Agenda: ${s.title}`, ...s.items.map((i) => renderItem(i, s)));
   if (s.minutes)
     lines.push(`Minutes: ${s.minutes}`);
   return lines.join(`
@@ -22298,15 +22312,17 @@ function renderEvent(e, v) {
     case "impostor":
       return `A call from ${e.address} was refused. That address is one of your contacts, but the caller did not hold the key saved for it, so it is not that contact. Tell your user.`;
     case "say":
-      return `[${e.item}] they said: ${e.text}`;
+      return `[${e.item}] ${e.by ?? "they"} said: ${e.text}`;
     case "add_item":
-      return `[${e.item}] they added an agenda item: ${e.title}`;
+      return `[${e.item}] ${e.by ?? "they"} added an agenda item: ${e.title}`;
     case "propose":
-      return `[${e.item}] they propose (${e.ref}): ${e.text}`;
+      return `[${e.item}] ${e.by ?? "they"} propose${e.by ? "s" : ""} (${e.ref}): ${e.text}`;
     case "agree":
-      return `[${e.item}] they agreed to your proposal ${e.ref}. The item is closed.`;
+      return e.by ? `[${e.item}] ${e.by} agreed to proposal ${e.ref}.` : `[${e.item}] they agreed to your proposal ${e.ref}. The item is closed.`;
     case "drop":
-      return `[${e.item}] they dropped the item: ${e.reason}`;
+      return `[${e.item}] ${e.by ?? "they"} dropped the item: ${e.reason}`;
+    case "left":
+      return `${e.who} left the session: ${e.reason}`;
   }
 }
 function renderMinutes(v, started, ended) {
@@ -22315,14 +22331,22 @@ function renderMinutes(v, started, ended) {
     throw new Error("no session to write minutes for");
   const mine = `${v.me.name} (${v.me.address})`;
   const theirs = `${s.peer.name} (${s.peer.address})`;
-  const by = (p) => p === "me" ? v.me.name : s.peer.name;
+  const named = (id) => {
+    const x = s.sides?.find((y) => y.id === id);
+    return x?.name ?? x?.address;
+  };
+  const by = (p, id) => id ? named(id) : p === "me" ? v.me.name : s.peer.name;
   const of = (state) => s.items.filter((i) => i.state === state);
-  const added = (i) => i.addedBy === "call" ? "" : ` (added during the session by ${by(i.addedBy)})`;
+  const added = (i) => i.addedBy === "call" ? "" : ` (added during the session by ${by(i.addedBy, i.addedById)})`;
+  const all = s.sides?.map((x) => `${x.name ?? "unnamed"} (${x.address})`);
+  const between = all ? `${all.slice(0, -1).join(", ")} and ${all.at(-1)}` : `${mine} and ${theirs}`;
+  const leavers = s.sides?.filter((x) => x.left) ?? [];
   const out = [
     `# ${s.title}`,
     "",
-    `- Between: ${mine} and ${theirs}`,
-    `- Called by: ${s.role === "caller" ? v.me.name : s.peer.name}`,
+    `- Between: ${between}`,
+    `- Called by: ${s.sides ? named("a") : s.role === "caller" ? v.me.name : s.peer.name}`,
+    ...leavers.map((x) => `- Left early: ${x.name ?? x.address}: ${x.left}`),
     `- Started: ${started.toISOString()}`,
     `- Ended: ${ended.toISOString()}`,
     `- How it ended: ${s.endedReason}`,
@@ -22333,7 +22357,7 @@ function renderMinutes(v, started, ended) {
   for (const i of of("agreed")) {
     out.push(`### ${i.id} · ${i.title}${added(i)}`, "");
     if (i.agreed) {
-      out.push(i.agreed.text, "", `Proposed by ${by(i.agreed.proposedBy)}.`, "");
+      out.push(i.agreed.text, "", `Proposed by ${by(i.agreed.proposedBy, i.agreed.proposedById)}.`, "");
     }
   }
   if (!of("agreed").length)
@@ -22349,7 +22373,7 @@ function renderMinutes(v, started, ended) {
     out.push(`- ${i.id} · ${i.title}${added(i)}`);
   if (!of("open").length)
     out.push("Nothing.");
-  out.push("", "Every entry both sides sent is in transcript.jsonl beside this file, each one signed by its sender.", "");
+  out.push("", `Every entry ${s.sides ? "every side" : "both sides"} sent is in transcript.jsonl beside this file, each one signed by its sender.`, "");
   return out.join(`
 `);
 }
@@ -22499,12 +22523,13 @@ async function runMcp() {
   server.registerTool("call", {
     description: "Call another agent and propose an agenda. Returns at once; a person on the other side then accepts or declines. Use wait to learn which. Write each item as one question or decision the two sides must settle.",
     inputSchema: {
-      to: string2().describe('Who to call: a parley address like k7fq-m2xa-9tzp, or a name that status lists under "You can call by name"'),
+      to: union([string2(), array(string2()).min(1).max(LIMITS.sides - 1)]).describe('Who to call: a parley address like k7fq-m2xa-9tzp, or a name that status lists under "You can call by name". A list calls every one of them into one session.'),
       title: string2().max(LIMITS.title).describe("What this session is for, in one line"),
       items: array(string2().max(LIMITS.title)).min(1).max(LIMITS.itemsAtCall).describe("The agenda items")
     }
   }, ({ to, title, items }) => named(async (rpc, me) => {
-    const v = await rpc("call", { address: addressFor(to, me.address), title, items });
+    const address = Array.isArray(to) ? to.map((t) => addressFor(t, me.address)) : addressFor(to, me.address);
+    const v = await rpc("call", { address, title, items });
     cursor = v.cursor;
     return `Calling. A person on the other side has to accept before anything can be said. Use wait.
 
@@ -22765,6 +22790,22 @@ var viewer_default = `<!doctype html>
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      .side {
+        border-top: 1px solid var(--line);
+        padding: 10px 0;
+      }
+      .side .item-head code {
+        font: 12.5px var(--mono);
+        color: var(--muted);
+      }
+      .sides {
+        margin-bottom: 28px;
+      }
+      .votes {
+        margin: 4px 0 0 30px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
       .feed {
         display: flex;
         flex-direction: column;
@@ -22880,6 +22921,10 @@ var viewer_default = `<!doctype html>
 
       <div class="cols" id="cols" hidden>
         <aside class="agenda">
+          <div class="sides" id="sides-box" hidden>
+            <h2>Sides</h2>
+            <div id="sides"></div>
+          </div>
           <h2>Agenda</h2>
           <p class="title" id="title"></p>
           <div id="items"></div>
@@ -22895,6 +22940,7 @@ var viewer_default = `<!doctype html>
       const $ = (id) => document.getElementById(id);
       let after = 0;
       let sessionId = null;
+      let agreements = new Map();
 
       // Everything the other side wrote arrives here as text and is only ever
       // placed with textContent.
@@ -22908,9 +22954,45 @@ var viewer_default = `<!doctype html>
       const clock = (at) =>
         new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+      const sideOf = (s, id) => s.sides.find((x) => x.id === id);
+      const nameOf = (x) => (x ? x.savedAs || x.name || x.address : 'Someone');
+      const names = (list) =>
+        list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+
+      function groupHeadline(s) {
+        const others = names(s.sides.filter((x) => !x.you && !x.left).map(nameOf));
+        const caller = sideOf(s, 'a');
+        switch (s.state) {
+          case 'dialing':
+            return ['wait', 'Calling ' + others + '…', ''];
+          case 'ringing':
+            return ['wait', 'Incoming call…', caller.address];
+          case 'awaiting_approval':
+            return s.role === 'caller'
+              ? ['wait', 'Waiting for people to accept', 'Your Claude called ' + others + '.']
+              : [
+                  'wait',
+                  nameOf(caller) + ' is calling',
+                  'Waiting for you to accept. ' +
+                    caller.address +
+                    '. ' +
+                    (caller.knownSince
+                      ? 'First connected on ' + caller.knownSince.slice(0, 10) + '.'
+                      : 'This address has not connected here before.'),
+                ];
+          case 'active':
+            return ['live', 'Connected with ' + others, ''];
+          case 'closing':
+            return ['wait', 'Ending…', ''];
+          default:
+            return ['', 'Ended: ' + s.endedReason, ''];
+        }
+      }
+
       function headline(view) {
         const s = view.session;
         if (!s) return ['', 'No call yet', 'This page updates by itself when your Claude calls or is called.'];
+        if (s.sides) return groupHeadline(s);
         const them = s.peer.name ? s.peer.name : s.peer.address;
         const known = s.peer.knownSince
           ? 'First connected on ' + s.peer.knownSince.slice(0, 10) + '.'
@@ -22933,7 +23015,38 @@ var viewer_default = `<!doctype html>
         }
       }
 
+      function renderSides(s) {
+        $('sides-box').hidden = !s.sides;
+        if (!s.sides) return;
+        $('sides').replaceChildren(
+          ...s.sides.map((x) => {
+            const row = el('div', 'side');
+            const head = el('div', 'item-head');
+            const name = el('span', 'item-title', x.you ? x.name : nameOf(x) + ' ');
+            if (!x.you && !x.savedAs) name.append(el('code', '', x.address));
+            head.append(el('span', 'id', x.id), name);
+            if (x.you) head.append(el('span', 'chip', 'you'));
+            if (x.left) head.append(el('span', 'chip dropped', 'left'));
+            row.append(head);
+            if (x.left) row.append(el('div', 'outcome', x.left));
+            return row;
+          }),
+        );
+      }
+
+      const called = (s, id) => (sideOf(s, id)?.you ? 'you' : nameOf(sideOf(s, id)));
+
+      function proposal(s, text, by, agreedBy) {
+        const box = el('div');
+        box.append(el('div', 'outcome', text));
+        const line = ['Proposed by ' + called(s, by)];
+        if (agreedBy) line.push(agreedBy.length ? 'agreed by ' + names(agreedBy.map((id) => called(s, id))) : 'no one has agreed yet');
+        box.append(el('div', 'votes', line.join(' · ')));
+        return box;
+      }
+
       function renderAgenda(s) {
+        renderSides(s);
         $('title').textContent = s.title;
         const items = $('items');
         items.replaceChildren();
@@ -22942,7 +23055,11 @@ var viewer_default = `<!doctype html>
           const head = el('div', 'item-head');
           head.append(el('span', 'id', i.id), el('span', 'item-title', i.title), el('span', 'chip ' + i.state, i.state));
           row.append(head);
-          if (i.agreed) row.append(el('div', 'outcome', i.agreed.text));
+          if (s.sides && i.agreed) row.append(proposal(s, i.agreed.text, i.agreed.proposedById));
+          else if (s.sides && i.state === 'open') {
+            if (i.mine) row.append(proposal(s, i.mine.text, i.mine.ref.split(':')[0], [...(agreements.get(i.mine.ref) ?? [])]));
+            for (const o of i.others ?? []) row.append(proposal(s, o.text, o.by, o.agreedBy));
+          } else if (i.agreed) row.append(el('div', 'outcome', i.agreed.text));
           else if (i.state === 'dropped') row.append(el('div', 'outcome', i.dropReason));
           items.append(row);
         }
@@ -22950,8 +23067,9 @@ var viewer_default = `<!doctype html>
 
       function renderEntry(f, s) {
         const mine = f.by === 'me';
-        const who = mine ? 'Your Claude' : s.peer.name || 'The other side';
-        const person = mine ? 'You' : (s.peer.name || 'The other side') + "'s person";
+        const them = s.sides ? nameOf(sideOf(s, f.author)) : s.peer.name || 'The other side';
+        const who = mine ? 'Your Claude' : them;
+        const person = mine ? 'You' : them + "'s person";
         const note = (text) => {
           const node = el('div', 'note');
           node.append(el('time', '', clock(f.at)), document.createTextNode(text));
@@ -22967,11 +23085,15 @@ var viewer_default = `<!doctype html>
           case 'add_item':
             return note(who + ' added ' + f.item + ': ' + f.text);
           case 'agree':
+            if (s.sides) {
+              const by = f.ref.split(':')[0];
+              return note(who + ' agreed to ' + (sideOf(s, by)?.you ? 'your' : called(s, by) + '’s') + ' ' + f.ref + ' on ' + f.item);
+            }
             return note(who + ' agreed to ' + f.ref + '. ' + f.item + ' is settled');
           case 'drop':
             return note(who + ' dropped ' + f.item + ': ' + f.text);
           case 'hangup':
-            return note(who + ' hung up: ' + f.text);
+            return note(who + (s.sides && f.author !== 'a' ? ' left: ' : ' hung up: ') + f.text);
         }
         const msg = el('div', 'msg' + (mine ? ' mine' : '') + (f.type === 'propose' ? ' propose' : ''));
         const meta = el('div', 'meta');
@@ -23001,7 +23123,11 @@ var viewer_default = `<!doctype html>
         const feed = $('feed');
         if (s.id !== sessionId) {
           sessionId = s.id;
+          agreements = new Map();
           feed.replaceChildren(el('div', 'empty', 'Nothing said yet.'));
+        }
+        for (const f of entries) {
+          if (f.type === 'agree') agreements.set(f.ref, [...(agreements.get(f.ref) ?? []), f.author]);
         }
         renderAgenda(s);
         if (!entries.length) return;
@@ -23234,6 +23360,7 @@ var GAP_WAIT_MS = 60000;
 var RESEND_MS = 3000;
 var RESEND_TRIES = 20;
 var INBOX_MAX = 100;
+var LETTERS = "abcdefgh";
 
 class ProtocolError extends Error {
 }
@@ -23254,8 +23381,19 @@ var newItem = (id, title, addedBy) => ({
   title,
   addedBy,
   state: "open",
-  proposals: new Map
+  proposals: new Map,
+  latest: new Map
 });
+var peerOf = (s) => {
+  const [first] = s.sides;
+  if (!first)
+    throw new Error("the session has no other side");
+  return first;
+};
+var everyone = (s) => [s.self, ...s.sides.map((x) => x.id)];
+var present = (s) => everyone(s).filter((id) => !s.left.has(id));
+var liveLegs = (s) => s.legs.filter((l) => l.keys && !s.left.has(l.side.id));
+var fullyAgreed = (s, p) => present(s).every((id) => id === p.by || p.agreedBy.has(id));
 async function runNode(home) {
   if (typeof WebSocket === "undefined") {
     throw new Error("parley needs Node 22 or newer (or Bun)");
@@ -23294,7 +23432,7 @@ async function runNode(home) {
       dir: s.dir,
       role: s.role,
       state: s.state,
-      peer: { address: s.peer.address, name: s.peer.name },
+      peer: { address: peerOf(s).address, name: peerOf(s).name },
       title: s.title,
       endedReason: s.state === "ended" ? s.endReason : undefined
     };
@@ -23343,7 +23481,7 @@ async function runNode(home) {
     } else if (msg.t === "recv") {
       onPeer(msg.from, msg.payload);
     } else if (msg.t === "undeliverable") {
-      onUndeliverable(msg.ref);
+      onUndeliverable(msg.ref, msg.to);
     }
   }
   function relaySend(to, payload, ref) {
@@ -23353,32 +23491,35 @@ async function runNode(home) {
     else
       outbox.push(msg);
   }
-  function sendControl(to, kind, session, eph) {
+  function sendControl(to, kind, session, eph, group) {
     const signed = JSON.stringify({
       kind,
       session,
       to,
       at: new Date().toISOString(),
-      eph
+      eph,
+      group: group ? 1 : undefined
     });
     relaySend(to, { signed, sig: signText(me, signed), key: me.publicKey }, `${kind}:${session}`);
   }
-  function onUndeliverable(ref) {
+  function onUndeliverable(ref, to) {
     const s = current;
     if (!s || s.state === "ended" || typeof ref !== "string")
       return;
+    const who = s.group ? `${to} is` : "the other side is";
     if (ref === `ring:${s.id}`)
-      return end(s, "the other side is not online");
+      return giveUp(s, `${who} not online`);
     const [id, seq] = ref.split(":");
-    const frame = id === s.id ? s.sent.get(Number(seq)) : undefined;
-    if (!frame)
+    const leg = s.legs.find((l) => l.side.address === to);
+    const frame = id === s.id ? leg?.sent.get(Number(seq)) : undefined;
+    if (!leg || !frame)
       return;
     if (++frame.tries > RESEND_TRIES) {
-      return end(s, "the other side went offline");
+      return end(s, s.group ? `${to} went offline` : "the other side went offline");
     }
     setTimeout(() => {
       if (current === s && s.state !== "ended") {
-        relaySend(s.peer.address, frame.payload, ref);
+        relaySend(leg.side.address, frame.payload, ref);
       }
     }, RESEND_MS);
   }
@@ -23390,11 +23531,18 @@ async function runNode(home) {
         onFrame(from, payload);
     } catch (err) {
       const s = current;
-      if (s && s.state !== "ended" && from === s.peer.address)
+      if (s && s.state !== "ended" && s.legs.some((l) => l.side.address === from))
         fail(s, err);
       else
         log(`dropped a message from ${from}:`, explain(err));
     }
+  }
+  function giveUp(s, reason) {
+    if (s.group && s.role === "caller" && s.legs.some((l) => l.keys)) {
+      s.endReason = reason;
+      sendEntry(s, { type: "hangup", reason });
+    }
+    end(s, reason);
   }
   function onControl(from, payload) {
     const { signed, sig, key } = payload;
@@ -23418,76 +23566,118 @@ async function runNode(home) {
         sendControl(from, "busy", c.session);
         return;
       }
-      const next = startSession(c.session, "callee", from);
-      next.peer.publicKey = key;
-      next.keys = deriveSessionKeys(next.eph, c.eph, next.id, "callee");
+      const next = startSession(c.session, "callee", [from]);
+      const leg = next.legs[0];
+      next.group = c.group === 1;
+      leg.side.publicKey = key;
+      leg.keys = deriveSessionKeys(leg.eph, c.eph, next.id, "callee");
       next.state = "ringing";
       writeHeader(next);
-      sendControl(from, "ringing", next.id, next.eph.publicKey);
+      sendControl(from, "ringing", next.id, leg.eph.publicKey, next.group);
       return;
     }
-    if (!s || s.id !== c.session || s.role !== "caller" || s.state !== "dialing" || from !== s.peer.address) {
+    const leg = s?.legs.find((l) => l.side.address === from);
+    if (!s || !leg || leg.keys || s.id !== c.session || s.role !== "caller" || s.state !== "dialing") {
       return;
     }
+    const who = s.group ? from : "the other side";
     if (!isSavedKey(from, key)) {
-      return end(s, "the answer did not come from the key saved for this contact, so this is not the contact you know");
+      return giveUp(s, `the answer did not come from the key saved for ${s.group ? from : "this contact"}, so this is not the contact you know`);
     }
     if (c.kind === "busy")
-      return end(s, "the other side is in another session");
+      return giveUp(s, `${who} is in another session`);
     if (!c.eph)
       return;
-    s.peer.publicKey = key;
-    s.keys = deriveSessionKeys(s.eph, c.eph, s.id, "caller");
+    leg.side.publicKey = key;
+    leg.keys = deriveSessionKeys(leg.eph, c.eph, s.id, "caller");
+    leg.group = c.group === 1;
+    if (s.group && !leg.group) {
+      return giveUp(s, `${from} runs a parley that cannot join a session of more than two`);
+    }
+    if (!s.legs.every((l) => l.keys))
+      return;
     writeHeader(s);
     sendEntry(s, {
       type: "call",
       name: me.name,
       title: s.title,
-      items: s.items.map((i) => i.title)
+      items: s.items.map((i) => i.title),
+      roster: s.group ? [
+        { id: "a", address, key: me.publicKey },
+        ...s.sides.map((x) => ({ id: x.id, address: x.address, key: x.publicKey ?? "" }))
+      ] : undefined
     });
+  }
+  function authorOf(s, leg, from) {
+    const side = s.group && s.role === "callee" ? s.sides.find((x) => x.address === from) : from === leg.side.address ? leg.side : undefined;
+    expect(side?.publicKey, s.group ? "an entry came from someone not in this session" : "an entry was not signed by the other side");
+    return side;
   }
   function onFrame(from, payload) {
     const s = current;
-    if (!s || !s.keys || !s.peer.publicKey || s.state === "ended" || payload?.session !== s.id || from !== s.peer.address) {
+    const leg = s?.legs.find((l) => l.side.address === from);
+    if (!s || !leg || !leg.keys || s.state === "ended" || s.left.has(leg.side.id) || payload?.session !== s.id) {
       return;
     }
     expect(Number.isInteger(payload.seq) && typeof payload.sealed === "string", "malformed frame");
-    if (payload.seq < s.recvSeq)
+    if (payload.seq < leg.recvSeq)
       return;
-    expect(s.inbox.size < INBOX_MAX, "too many out-of-order frames");
-    s.inbox.set(payload.seq, payload.sealed);
-    for (let sealed = s.inbox.get(s.recvSeq);sealed !== undefined && !hasEnded(s); sealed = s.inbox.get(s.recvSeq)) {
-      s.inbox.delete(s.recvSeq);
-      const { raw, sig } = JSON.parse(open(s.keys.recv, s.recvSeq, sealed));
-      expect(typeof raw === "string" && typeof sig === "string" && verifyText(s.peer.publicKey, raw, sig), "an entry was not signed by the other side");
+    expect(leg.inbox.size < INBOX_MAX, "too many out-of-order frames");
+    leg.inbox.set(payload.seq, payload.sealed);
+    for (let sealed = leg.inbox.get(leg.recvSeq);sealed !== undefined && !hasEnded(s); sealed = leg.inbox.get(leg.recvSeq)) {
+      leg.inbox.delete(leg.recvSeq);
+      const { raw, sig } = JSON.parse(open(leg.keys.recv, leg.recvSeq, sealed));
+      expect(typeof raw === "string" && typeof sig === "string", "an entry was not signed by the other side");
+      const author = authorOf(s, leg, JSON.parse(raw)?.from);
+      expect(author.publicKey && verifyText(author.publicKey, raw, sig), s.group ? `an entry was not signed by ${author.address}, whose entry it says it is` : "an entry was not signed by the other side");
       const entry = EntrySchema.parse(JSON.parse(raw));
-      expect(entry.session === s.id && entry.seq === s.recvSeq && entry.from === s.peer.address, "an entry does not belong to this session");
-      s.recvSeq++;
+      expect(entry.session === s.id && entry.seq === author.nextSeq, "an entry does not belong to this session");
+      leg.recvSeq++;
+      author.nextSeq++;
       record(s, raw, sig);
-      apply(s, entry, "peer");
+      if (s.group && s.role === "caller") {
+        for (const other of liveLegs(s))
+          if (other !== leg)
+            sendFrame(s, other, raw, sig);
+      }
+      apply(s, entry, author.id);
     }
-    s.gapSince = s.inbox.size ? s.gapSince ?? Date.now() : undefined;
+    leg.gapSince = leg.inbox.size ? leg.gapSince ?? Date.now() : undefined;
   }
-  function startSession(id, role, peerAddress) {
+  function startSession(id, role, peers) {
     events.length = 0;
     feed.length = 0;
     const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
     const dir = join7(home, "sessions", `${stamp}-${id}`);
     mkdirSync3(dir, { recursive: true });
-    const known = loadContacts()[peerAddress];
+    const contacts = loadContacts();
+    const sides = peers.map((peer, i) => ({
+      id: role === "caller" ? LETTERS[i + 1] : "a",
+      address: peer,
+      knownSince: contacts[peer]?.firstSeen,
+      savedAs: contacts[peer]?.name,
+      nextSeq: 0
+    }));
     current = {
       id,
       dir,
       role,
       state: "dialing",
-      peer: { address: peerAddress },
-      knownSince: known?.firstSeen,
-      savedAs: known?.name,
-      eph: newEphemeral(),
-      sendSeq: 0,
-      recvSeq: 0,
-      inbox: new Map,
-      sent: new Map,
+      group: false,
+      self: role === "caller" ? "a" : "b",
+      sides,
+      legs: sides.map((side) => ({
+        side,
+        eph: newEphemeral(),
+        sendSeq: 0,
+        recvSeq: 0,
+        inbox: new Map,
+        sent: new Map
+      })),
+      seq: 0,
+      accepted: new Set,
+      left: new Map,
+      confirmed: new Set,
       title: "",
       items: [],
       createdAt: Date.now(),
@@ -23499,11 +23689,13 @@ async function runNode(home) {
   }
   function writeHeader(s) {
     const mine = { address, publicKey: me.publicKey };
-    const theirs = { address: s.peer.address, publicKey: s.peer.publicKey };
+    const peer = peerOf(s);
+    const theirs = { address: peer.address, publicKey: peer.publicKey };
     record(s, JSON.stringify({
       session: s.id,
       caller: s.role === "caller" ? mine : theirs,
-      callee: s.role === "caller" ? theirs : mine
+      callee: s.role === "caller" ? theirs : mine,
+      sides: s.group && s.role === "caller" ? s.sides.map((x) => ({ id: x.id, address: x.address, publicKey: x.publicKey })) : undefined
     }));
   }
   function record(s, raw, sig) {
@@ -23511,10 +23703,24 @@ async function runNode(home) {
 `);
     cloud.touch();
   }
-  function sendEntry(s, body) {
-    if (!s.keys)
+  function sendFrame(s, leg, raw, sig) {
+    if (!leg.keys)
       throw new Error("the session has no keys yet");
-    const seq = s.sendSeq++;
+    const seq = leg.sendSeq++;
+    const payload = {
+      kind: "frame",
+      session: s.id,
+      seq,
+      sealed: seal(leg.keys.send, seq, JSON.stringify({ raw, sig }))
+    };
+    leg.sent.set(seq, { payload, tries: 0 });
+    relaySend(leg.side.address, payload, `${s.id}:${seq}`);
+  }
+  function sendEntry(s, body) {
+    const legs = liveLegs(s);
+    if (!legs.length)
+      throw new Error("the session has no keys yet");
+    const seq = s.seq++;
     const entry = {
       session: s.id,
       seq,
@@ -23524,25 +23730,101 @@ async function runNode(home) {
     };
     const raw = JSON.stringify(entry);
     const sig = signText(me, raw);
-    const payload = {
-      kind: "frame",
-      session: s.id,
-      seq,
-      sealed: seal(s.keys.send, seq, JSON.stringify({ raw, sig }))
-    };
-    s.sent.set(seq, { payload, tries: 0 });
-    relaySend(s.peer.address, payload, `${s.id}:${seq}`);
+    for (const leg of legs)
+      sendFrame(s, leg, raw, sig);
     record(s, raw, sig);
-    apply(s, entry, "me");
+    apply(s, entry, s.self);
   }
-  function apply(s, e, by) {
+  const sideOf = (s, id) => s.sides.find((x) => x.id === id);
+  function nameOf(s, id) {
+    if (id === s.self)
+      return me.name;
+    const x = sideOf(s, id);
+    return `${x?.name ?? x?.savedAs ?? x?.address ?? "unknown"} (${id})`;
+  }
+  function takeRoster(s, roster) {
+    expect(s.group, "a call of more than two sides that did not ask for one");
+    const caller = peerOf(s);
+    const [first] = roster;
+    expect(first?.address === caller.address && first.key === caller.publicKey && roster.every((r, i) => r.id === LETTERS[i] && addressOf(r.key) === r.address) && new Set(roster.map((r) => r.address)).size === roster.length, "the call names its sides wrongly");
+    const mine = roster.find((r) => r.address === address);
+    expect(mine && mine.key === me.publicKey, "the call does not name this side");
+    const contacts = loadContacts();
+    const others = roster.filter((r) => r.id !== "a" && r !== mine);
+    for (const r of others) {
+      expect(isSavedKey(r.address, r.key), `the call names ${r.address} with a key other than the one saved for that contact`);
+    }
+    s.self = mine.id;
+    s.sides = [
+      caller,
+      ...others.map((r) => ({
+        id: r.id,
+        address: r.address,
+        publicKey: r.key,
+        knownSince: contacts[r.address]?.firstSeen,
+        savedAs: contacts[r.address]?.name,
+        nextSeq: 0
+      }))
+    ];
+  }
+  function openIfReady(s) {
+    if (s.state !== "awaiting_approval")
+      return;
+    if (!present(s).every((id) => id === "a" || s.accepted.has(id)))
+      return;
+    s.state = "active";
+    s.activeSince = Date.now();
+    for (const x of s.sides) {
+      if (x.name && x.publicKey && !s.left.has(x.id))
+        saveContact(x.address, x.name, x.publicKey);
+    }
+    emit({ kind: "opened" });
+    if (config.openViewer) {
+      openInBrowser(viewerUrl, (why) => log("could not open the live view:", why));
+    }
+  }
+  function leave(s, id, reason) {
+    if (s.role === "caller" && s.state === "closing") {
+      s.confirmed.add(id);
+      if (s.sides.every((x) => s.left.has(x.id) || s.confirmed.has(x.id)))
+        end(s, s.endReason ?? reason);
+      return;
+    }
+    s.left.set(id, reason);
+    emit({ kind: "left", who: nameOf(s, id), reason });
+    if (present(s).length < 2) {
+      return end(s, `everyone else has left (${nameOf(s, id)}: ${reason})`);
+    }
+    openIfReady(s);
+    if (s.state !== "active")
+      return;
+    for (const item of s.items) {
+      if (item.state !== "open")
+        continue;
+      const done = [...item.proposals.values()].filter((p) => fullyAgreed(s, p) && p.agreedBy.size);
+      const p = done.find((d) => d.ref.startsWith("a:")) ?? done[0];
+      if (p) {
+        item.state = "agreed";
+        item.agreed = p;
+      }
+    }
+    finishIfDone(s);
+  }
+  function finishIfDone(s) {
+    if (s.state === "active" && s.items.every((i) => i.state !== "open")) {
+      sendEntry(s, { type: "hangup", reason: "agenda complete" });
+    }
+  }
+  function apply(s, e, author) {
     s.lastActivity = Date.now();
     s.entries++;
-    const authorRole = by === "me" ? s.role : s.role === "caller" ? "callee" : "caller";
-    const lead = authorRole === "caller" ? "a" : "b";
+    const by = author === s.self ? "me" : "peer";
+    const lead = author;
+    const said = s.group ? { by: nameOf(s, author) } : {};
     feed.push({
       n: ++feedCounter,
       by,
+      author: s.group ? author : undefined,
       at: e.at,
       type: e.type,
       item: "item" in e ? e.item : e.type === "add_item" ? e.id : undefined,
@@ -23551,36 +23833,59 @@ async function runNode(home) {
     });
     switch (e.type) {
       case "call":
-        expect(authorRole === "caller" && s.state === (by === "me" ? "dialing" : "ringing"), "a call arrived out of turn");
+        expect(author === "a" && s.state === (by === "me" ? "dialing" : "ringing"), "a call arrived out of turn");
+        if (by === "peer") {
+          if (e.roster)
+            takeRoster(s, e.roster);
+          else
+            s.group = false;
+        }
         s.title = e.title;
         s.items = e.items.map((t, i) => newItem(`a${i + 1}`, t, "call"));
         s.state = "awaiting_approval";
         if (by === "peer") {
-          s.peer.name = e.name;
+          peerOf(s).name = e.name;
           s.answerIn = config.approval;
           emit({ kind: "incoming" });
           promptForApproval(s);
         }
         return;
       case "accept":
-        expect(authorRole === "callee" && s.state === "awaiting_approval", "an accept arrived out of turn");
-        if (by === "peer")
-          s.peer.name = e.name;
-        s.state = "active";
-        s.activeSince = Date.now();
-        if (s.peer.name && s.peer.publicKey) {
-          saveContact(s.peer.address, s.peer.name, s.peer.publicKey);
+        expect(author !== "a" && s.state === "awaiting_approval" && !s.accepted.has(author), "an accept arrived out of turn");
+        if (by === "peer") {
+          const x = sideOf(s, author);
+          if (x)
+            x.name = e.name;
         }
-        emit({ kind: "opened" });
-        if (config.openViewer) {
-          openInBrowser(viewerUrl, (why) => log("could not open the live view:", why));
-        }
+        s.accepted.add(author);
+        openIfReady(s);
         return;
       case "decline":
-        expect(authorRole === "callee" && s.state === "awaiting_approval", "a decline arrived out of turn");
-        end(s, by === "me" ? `you declined: ${e.reason}` : `the other side declined: ${e.reason}`);
+        expect(author !== "a" && s.state === "awaiting_approval", "a decline arrived out of turn");
+        if (!s.group || by === "me") {
+          end(s, by === "me" ? `you declined: ${e.reason}` : `the other side declined: ${e.reason}`);
+        } else {
+          leave(s, author, `declined: ${e.reason}`);
+        }
         return;
       case "hangup":
+        if (s.group) {
+          if (by === "me" && s.self === "a") {
+            s.endReason ??= e.reason;
+            s.state = "closing";
+            s.closingSince = Date.now();
+            if (s.sides.every((x) => s.left.has(x.id)))
+              end(s, s.endReason);
+          } else if (by === "me") {
+            end(s, s.endReason ?? e.reason);
+          } else if (author === "a") {
+            s.endReason ??= `${nameOf(s, "a")} hung up: ${e.reason}`;
+            sendEntry(s, { type: "hangup", reason: "the caller hung up" });
+          } else {
+            leave(s, author, e.reason);
+          }
+          return;
+        }
         s.hungUp[by] = e.reason;
         s.endReason ??= by === "me" ? e.reason : `the other side hung up: ${e.reason}`;
         if (by === "peer" && !s.hungUp.me) {
@@ -23597,47 +23902,42 @@ async function runNode(home) {
     if (e.type === "add_item") {
       expect(new RegExp(`^${lead}[1-9][0-9]*$`).test(e.id) && !s.items.some((i) => i.id === e.id), `bad agenda item id ${e.id}`);
       expect(s.items.length < LIMITS.itemsTotal, "too many agenda items");
-      s.items.push(newItem(e.id, e.title, by));
+      s.items.push(newItem(e.id, e.title, author));
       if (by === "peer")
-        emit({ kind: "add_item", item: e.id, title: e.title });
+        emit({ kind: "add_item", item: e.id, title: e.title, ...said });
     } else {
       const item = s.items.find((i) => i.id === e.item);
       expect(item, `no agenda item ${e.item}`);
       if (e.type === "say") {
         if (by === "peer")
-          emit({ kind: "say", item: item.id, text: e.text });
+          emit({ kind: "say", item: item.id, text: e.text, ...said });
       } else if (e.type === "propose") {
-        const p = { ref: `${lead}:${e.seq}`, by, text: e.text };
+        const p = { ref: `${lead}:${e.seq}`, by: author, text: e.text, agreedBy: new Set };
         item.proposals.set(p.ref, p);
-        if (item.state === "open") {
-          if (by === "me")
-            item.mine = p;
-          else
-            item.theirs = p;
-        }
+        if (item.state === "open")
+          item.latest.set(author, p);
         if (by === "peer") {
-          emit({ kind: "propose", item: item.id, ref: p.ref, text: e.text });
+          emit({ kind: "propose", item: item.id, ref: p.ref, text: e.text, ...said });
         }
       } else if (e.type === "agree") {
         const p = item.proposals.get(e.ref);
-        expect(p && p.by !== by, "agree names a proposal that is not the other side’s");
-        if (item.state !== "agreed" || p.ref.startsWith("a:")) {
+        expect(p && p.by !== author, "agree names a proposal that is not the other side’s");
+        p.agreedBy.add(author);
+        if (fullyAgreed(s, p) && (item.state !== "agreed" || p.ref.startsWith("a:"))) {
           item.state = "agreed";
           item.agreed = p;
         }
         if (by === "peer")
-          emit({ kind: "agree", item: item.id, ref: e.ref });
+          emit({ kind: "agree", item: item.id, ref: e.ref, ...said });
       } else if (item.state === "open") {
         item.state = "dropped";
         item.dropReason = e.reason;
         if (by === "peer") {
-          emit({ kind: "drop", item: item.id, reason: e.reason });
+          emit({ kind: "drop", item: item.id, reason: e.reason, ...said });
         }
       }
     }
-    if (s.state === "active" && s.items.every((i) => i.state !== "open")) {
-      sendEntry(s, { type: "hangup", reason: "agenda complete" });
-    }
+    finishIfDone(s);
   }
   function end(s, reason) {
     if (s.state === "ended")
@@ -23646,8 +23946,10 @@ async function runNode(home) {
     s.endReason = reason;
     s.endedAt = Date.now();
     s.dialog?.kill();
-    s.inbox.clear();
-    s.sent.clear();
+    for (const leg of s.legs) {
+      leg.inbox.clear();
+      leg.sent.clear();
+    }
     if (s.activeSince) {
       const v = view();
       if (v.session) {
@@ -23661,8 +23963,9 @@ async function runNode(home) {
     log("session failed:", why);
     s.endReason = why;
     try {
-      if (s.keys && !s.hungUp.me)
+      if (liveLegs(s).length && !s.hungUp.me && !(s.group && s.state === "closing")) {
         sendEntry(s, { type: "hangup", reason: why });
+      }
     } catch (sendErr) {
       log("could not tell the other side:", explain(sendErr));
     }
@@ -23678,10 +23981,15 @@ async function runNode(home) {
       return;
     const clean = (t) => t.replace(/[\u0000-\u001f\u007f]/g, " ");
     const held = holder(address);
+    const peer = peerOf(s);
     const text = [
-      `${clean(s.peer.name ?? "Someone")} is calling "${clean(me.name)}", one of your Claude Code sessions.`,
-      `Address: ${s.peer.address}`,
-      s.knownSince ? `You first connected to this address on ${s.knownSince.slice(0, 10)}.` : "You have NOT connected to this address before.",
+      `${clean(peer.name ?? "Someone")} is calling "${clean(me.name)}", one of your Claude Code sessions.`,
+      `Address: ${peer.address}`,
+      peer.knownSince ? `You first connected to this address on ${peer.knownSince.slice(0, 10)}.` : "You have NOT connected to this address before.",
+      ...s.group ? [
+        "Also called into this session:",
+        ...s.sides.slice(1).map((x) => `  • ${x.savedAs ? clean(x.savedAs) : "someone you have not connected to"} (${x.address})`)
+      ] : [],
       "",
       `Agenda: ${clean(s.title)}`,
       ...s.items.map((i) => `  • ${clean(i.title)}`),
@@ -23739,22 +24047,45 @@ async function runNode(home) {
         role: s.role,
         state: s.state,
         peer: {
-          address: s.peer.address,
-          name: s.peer.name,
-          knownSince: s.knownSince,
-          savedAs: s.savedAs
+          address: peerOf(s).address,
+          name: peerOf(s).name,
+          knownSince: peerOf(s).knownSince,
+          savedAs: peerOf(s).savedAs
         },
+        sides: s.group ? [
+          { id: s.self, name: me.name, address, you: true },
+          ...s.sides.map((x) => ({
+            id: x.id,
+            name: x.name,
+            address: x.address,
+            knownSince: x.knownSince,
+            savedAs: x.savedAs,
+            left: s.left.get(x.id)
+          }))
+        ].sort((x, y) => x.id.localeCompare(y.id)) : undefined,
         title: s.title,
-        items: s.items.map((i) => ({
-          id: i.id,
-          title: i.title,
-          addedBy: i.addedBy,
-          state: i.state,
-          mine: i.state === "open" ? i.mine : undefined,
-          theirs: i.state === "open" ? i.theirs : undefined,
-          agreed: i.agreed && { text: i.agreed.text, proposedBy: i.agreed.by },
-          dropReason: i.dropReason
-        })),
+        items: s.items.map((i) => {
+          const open = i.state === "open";
+          const who = (id) => id === s.self ? "me" : "peer";
+          const shown = (p) => p && { ref: p.ref, by: who(p.by), text: p.text };
+          const others = [...i.latest.values()].filter((p) => p.by !== s.self);
+          return {
+            id: i.id,
+            title: i.title,
+            addedBy: i.addedBy === "call" ? "call" : who(i.addedBy),
+            addedById: s.group && i.addedBy !== "call" ? i.addedBy : undefined,
+            state: i.state,
+            mine: open ? shown(i.latest.get(s.self)) : undefined,
+            theirs: open && !s.group ? shown(others[0]) : undefined,
+            others: open && s.group ? others.map((p) => ({ ref: p.ref, by: p.by, text: p.text, agreedBy: [...p.agreedBy] })) : undefined,
+            agreed: i.agreed && {
+              text: i.agreed.text,
+              proposedBy: who(i.agreed.by),
+              proposedById: s.group ? i.agreed.by : undefined
+            },
+            dropReason: i.dropReason
+          };
+        }),
         endedReason: s.state === "ended" ? s.endReason : undefined,
         minutes: s.state === "ended" && s.activeSince ? join7(s.dir, "minutes.md") : undefined
       }
@@ -23792,9 +24123,11 @@ async function runNode(home) {
     },
     call: (args) => {
       const a = ArgSchemas.call.parse(args);
-      const to = normalizeAddress(a.address);
-      if (to === address)
+      const to = (Array.isArray(a.address) ? a.address : [a.address]).map(normalizeAddress);
+      if (to.includes(address))
         throw new Error("that is your own address");
+      if (new Set(to).size !== to.length)
+        throw new Error("an address is named twice");
       if (current && current.state !== "ended") {
         throw new Error("a session is already in progress; hang up first");
       }
@@ -23804,7 +24137,10 @@ async function runNode(home) {
       const s = startSession(randomBytes(8).toString("hex"), "caller", to);
       s.title = a.title;
       s.items = a.items.map((t, i) => newItem(`a${i + 1}`, t, "call"));
-      sendControl(to, "ring", s.id, s.eph.publicKey);
+      s.group = to.length > 1;
+      for (const leg of s.legs) {
+        sendControl(leg.side.address, "ring", s.id, leg.eph.publicKey, s.group);
+      }
       return view();
     },
     wait: (args) => {
@@ -23847,7 +24183,7 @@ async function runNode(home) {
       if (s.items.length >= LIMITS.itemsTotal) {
         throw new Error(`an agenda holds at most ${LIMITS.itemsTotal} items`);
       }
-      const lead = s.role === "caller" ? "a" : "b";
+      const lead = s.self;
       const taken = s.items.filter((i) => i.id.startsWith(lead)).length;
       sendEntry(s, { type: "add_item", id: `${lead}${taken + 1}`, title: a.title });
       return view();
@@ -23863,11 +24199,24 @@ async function runNode(home) {
       const a = ArgSchemas.agree.parse(args);
       const s = live();
       const item = openItem(s, a.item);
-      if (!item.theirs) {
-        throw new Error(`the other side has made no proposal on ${a.item}`);
-      }
-      if (item.theirs.ref !== a.proposal) {
-        throw new Error(`their latest proposal on ${a.item} is ${item.theirs.ref}, not ${a.proposal}; read it before agreeing`);
+      const offers = [...item.latest.values()].filter((p) => p.by !== s.self);
+      if (!s.group) {
+        const [theirs] = offers;
+        if (!theirs) {
+          throw new Error(`the other side has made no proposal on ${a.item}`);
+        }
+        if (theirs.ref !== a.proposal) {
+          throw new Error(`their latest proposal on ${a.item} is ${theirs.ref}, not ${a.proposal}; read it before agreeing`);
+        }
+      } else {
+        if (!offers.length)
+          throw new Error(`nobody else has made a proposal on ${a.item}`);
+        const p = offers.find((o) => o.ref === a.proposal);
+        if (!p) {
+          throw new Error(`the latest proposals on ${a.item} are ${offers.map((o) => o.ref).join(", ")}, not ${a.proposal}; read one before agreeing`);
+        }
+        if (p.agreedBy.has(s.self))
+          throw new Error(`you have already agreed to ${a.proposal}`);
       }
       sendEntry(s, { type: "agree", item: a.item, ref: a.proposal });
       return view();
@@ -23887,7 +24236,9 @@ async function runNode(home) {
       if (s.state === "closing")
         throw new Error("already hanging up");
       const why = `you hung up: ${reason}`;
-      if (!s.keys || s.state === "dialing" || s.state === "ringing")
+      if (s.state === "dialing")
+        giveUp(s, why);
+      else if (!s.legs.some((l) => l.keys) || s.state === "ringing")
         end(s, why);
       else {
         s.endReason = why;
@@ -23991,7 +24342,7 @@ async function runNode(home) {
     try {
       if (s.state === "dialing" || s.state === "ringing") {
         if (now - s.createdAt > HANDSHAKE_MS) {
-          end(s, "the other side did not complete the handshake");
+          giveUp(s, "the other side did not complete the handshake");
         }
       } else if (s.state === "awaiting_approval") {
         if (now - s.createdAt > RING_MS && s.role === "callee") {
@@ -24010,7 +24361,7 @@ async function runNode(home) {
       } else if (s.entries >= maxEntries) {
         auto(`the ${maxEntries}-message limit was reached`);
       }
-      if (!hasEnded(s) && s.gapSince && now - s.gapSince > GAP_WAIT_MS) {
+      if (!hasEnded(s) && s.legs.some((l) => l.gapSince && now - l.gapSince > GAP_WAIT_MS)) {
         end(s, "a message from the other side was lost");
       }
     } catch (err) {
@@ -24133,7 +24484,12 @@ var STATE_TEXT2 = {
   closing: "ending",
   ended: "ended"
 };
-var who2 = (s) => `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address})`;
+var label2 = (x) => `${x.name ? `"${x.name}"` : "an unnamed side"} (${x.id}, ${x.address})${x.left ? `, who left: ${x.left}` : ""}`;
+var who2 = (s) => s.sides ? s.sides.filter((x) => !x.you).map(label2).join(", ") : `${s.peer.name ? `"${s.peer.name}"` : s.withheld ? "a new caller" : "an unnamed caller"} (${s.peer.address})`;
+var sideName2 = (s, id) => {
+  const x = s.sides?.find((y) => y.id === id);
+  return x?.you ? "you" : `${x?.name ?? x?.address ?? "unknown"} (${id})`;
+};
 function forAgent2(v) {
   const s = v.session;
   if (s?.role !== "callee" || s.state !== "ringing" && s.state !== "awaiting_approval") {
@@ -24146,14 +24502,19 @@ function forAgent2(v) {
       withheld: true,
       title: "",
       items: [],
-      peer: { ...s.peer, name: s.peer.savedAs }
+      peer: { ...s.peer, name: s.peer.savedAs },
+      sides: s.sides?.map((x) => x.you ? x : { ...x, name: x.savedAs })
     }
   };
 }
-function renderItem2(i) {
+function renderItem2(i, s) {
   const lines = [`  ${i.id} [${i.state}] ${i.title}`];
   if (i.agreed)
     lines.push(`      agreed: ${i.agreed.text}`);
+  for (const o of i.others ?? []) {
+    const agreed = o.agreedBy.map((id) => sideName2(s, id));
+    lines.push(`      ${sideName2(s, o.by)} proposes (${o.ref}): ${o.text}${agreed.length ? ` [agreed by ${agreed.join(", ")}]` : ""}`);
+  }
   if (i.state === "dropped")
     lines.push(`      dropped: ${i.dropReason}`);
   if (i.theirs) {
@@ -24185,7 +24546,7 @@ function renderView2(v) {
     lines.push("What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.");
   }
   if (s.title)
-    lines.push(`Agenda: ${s.title}`, ...s.items.map(renderItem2));
+    lines.push(`Agenda: ${s.title}`, ...s.items.map((i) => renderItem2(i, s)));
   if (s.minutes)
     lines.push(`Minutes: ${s.minutes}`);
   return lines.join(`
