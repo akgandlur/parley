@@ -74,6 +74,11 @@ export function renderView(v: View): string {
         : 'This address has not connected here before.',
     );
   }
+  if (s.peerQuietSeconds !== undefined) {
+    lines.push(
+      `Nothing has been heard from the other side for ${s.peerQuietSeconds} seconds; it may be offline.`,
+    );
+  }
   if (s.withheld) {
     lines.push(
       'What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.',

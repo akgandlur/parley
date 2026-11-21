@@ -17,7 +17,12 @@ export type Config = {
   relay: string;
   approval: 'dialog' | 'terminal';
   openViewer?: boolean;
-  limits: { idleMinutes: number; maxMinutes: number; maxEntries: number };
+  limits: {
+    idleMinutes: number;
+    maxMinutes: number;
+    maxEntries: number;
+    aliveSeconds?: number;
+  };
 };
 
 export type Contact = { name: string; firstSeen: string; key?: string };

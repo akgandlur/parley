@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { ServerWebSocket } from 'bun';
 import { verifyText, type Identity } from '../src/crypto';
 import { readJson, writeJson, type Config, type Contact } from '../src/home';
 import { request, type NodeInfo } from '../src/ipc';
@@ -680,6 +681,137 @@ async function olderInstalls() {
   check('an older node is replaced once it is idle', node().pid !== started.pid && node().version === VERSION, node());
 }
 
+type Hop = { up?: WebSocket; queue: string[]; frozen: boolean };
+
+// Sits between one node and the relay. `dropFrames` loses that many session
+// frames on the way out; `freeze` makes every open connection go silent in
+// both directions without closing, the way a sleeping laptop's does.
+function startProxy(target: string) {
+  const hops = new Set<ServerWebSocket<Hop>>();
+  const ctl = { dropFrames: 0, connections: 0 };
+  const server = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    fetch(req, srv) {
+      return srv.upgrade(req, { data: { queue: [], frozen: false } }) ? undefined : new Response('proxy\n');
+    },
+    websocket: {
+      data: {} as Hop,
+      open(ws) {
+        ctl.connections++;
+        hops.add(ws);
+        const up = new WebSocket(target);
+        ws.data.up = up;
+        up.onopen = () => {
+          for (const m of ws.data.queue.splice(0)) up.send(m);
+        };
+        up.onmessage = (ev) => {
+          if (!ws.data.frozen) ws.send(String(ev.data));
+        };
+        up.onclose = () => {
+          if (!ws.data.frozen) ws.close();
+        };
+      },
+      message(ws, raw) {
+        if (ws.data.frozen) return;
+        const text = String(raw);
+        if (ctl.dropFrames > 0 && JSON.parse(text).payload?.kind === 'frame') {
+          ctl.dropFrames--;
+          return;
+        }
+        const up = ws.data.up;
+        if (up?.readyState === WebSocket.OPEN) up.send(text);
+        else ws.data.queue.push(text);
+      },
+      close(ws) {
+        hops.delete(ws);
+        if (!ws.data.frozen) ws.data.up?.close();
+      },
+    },
+  });
+  return {
+    url: `ws://127.0.0.1:${server.port}`,
+    ctl,
+    freeze: () => hops.forEach((h) => (h.data.frozen = true)),
+    stop: () => server.stop(true),
+  };
+}
+
+async function badNetwork() {
+  console.log('\n# when the network or the other side fails');
+  const proxy = startProxy(relayUrl);
+  const [hank, ivy] = [new Peer('Hank'), new Peer('Ivy')];
+  extras.push(hank, ivy);
+  for (const p of [hank, ivy]) {
+    p.init();
+    const config = readJson<Config>(p.home, 'config.json');
+    writeJson(p.home, 'config.json', {
+      ...config,
+      relay: p === hank ? proxy.url : config.relay,
+      limits: { ...config.limits, aliveSeconds: 1 },
+    });
+    p.start();
+    await connected(p);
+  }
+
+  await open(hank, ivy, 'Over a bad line', ['One']);
+  await Bun.sleep(1500);
+  proxy.ctl.dropFrames = 1;
+  await hank.rpc('say', { item: 'a1', text: 'lost once' });
+  const resent = await ivy.until('say', 8000);
+  check('a message the network lost is sent again and arrives', proxy.ctl.dropFrames === 0 && resent.some((e) => e.kind === 'say' && e.text === 'lost once'), resent);
+  await hank.rpc('say', { item: 'a1', text: 'and the next one' });
+  await ivy.until('say');
+  await Bun.sleep(1500);
+  check('the session stays open on both sides', (await hank.session()).state === 'active' && (await ivy.session()).state === 'active');
+
+  const before = proxy.ctl.connections;
+  const frozeAt = Date.now();
+  proxy.freeze();
+  let back = false;
+  while (!back && Date.now() - frozeAt < 8000) {
+    await Bun.sleep(100);
+    back = proxy.ctl.connections > before && (await hank.rpc('status')).relay.connected;
+  }
+  check(`a relay connection that goes silent is replaced (${Date.now() - frozeAt} ms)`, back && Date.now() - frozeAt < 5000);
+  await hank.rpc('say', { item: 'a1', text: 'after the silence' });
+  const after = await ivy.until('say', 8000);
+  check('the session carries on over the new connection', after.some((e) => e.kind === 'say' && e.text === 'after the silence') && (await hank.session()).state === 'active', after);
+  await hank.rpc('hangup', { reason: 'next test' });
+  await hank.until('ended');
+  await ivy.until('ended');
+
+  await open(hank, ivy, 'Frozen peer', ['One']);
+  await Bun.sleep(1500);
+  const ivyPid = readJson<NodeInfo>(ivy.home, 'node.json').pid;
+  process.kill(ivyPid, 'SIGSTOP');
+  try {
+    let quiet: number | undefined;
+    for (let i = 0; i < 60 && quiet === undefined; i++) {
+      await Bun.sleep(100);
+      quiet = (await hank.session()).peerQuietSeconds;
+    }
+    check('a peer that stops answering is shown as quiet', quiet !== undefined && hank.cli('status').includes('Nothing has been heard from the other side'), quiet);
+    const silent = (await hank.until('ended', 8000)).find((e) => e.kind === 'ended');
+    check('and the session ends once it has been quiet too long', silent?.kind === 'ended' && silent.reason === 'the other side stopped answering', silent);
+  } finally {
+    process.kill(ivyPid, 'SIGCONT');
+  }
+  await ivy.until('ended', 10_000);
+
+  await open(hank, ivy, 'Peer goes away', ['One']);
+  await Bun.sleep(1500);
+  await hank.rpc('stop');
+  const stoppedAt = Date.now();
+  const gone = (await ivy.until('ended', 10_000)).find((e) => e.kind === 'ended');
+  check(
+    `when the other node stops, the session ends without sending anything (${Date.now() - stoppedAt} ms)`,
+    gone?.kind === 'ended' && gone.reason === 'the other side went offline' && Date.now() - stoppedAt < 6000,
+    gone,
+  );
+  proxy.stop();
+}
+
 const dave = new Peer('Dave');
 const extras: Peer[] = [dave];
 
@@ -698,6 +830,7 @@ try {
   await names();
   await olderInstalls();
   await whoAccepts();
+  await badNetwork();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.message : err);

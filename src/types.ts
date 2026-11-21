@@ -114,6 +114,7 @@ export type SessionView = {
   items: ItemView[];
   endedReason?: string;
   minutes?: string;
+  peerQuietSeconds?: number;
 };
 
 export type FeedEntry = {

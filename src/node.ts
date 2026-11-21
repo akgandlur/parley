@@ -59,6 +59,11 @@ const GAP_WAIT_MS = 60_000;
 const RESEND_MS = 3_000;
 const RESEND_TRIES = 20;
 const INBOX_MAX = 100;
+const RETRY_MAX_MS = 15_000;
+const CONNECT_WAIT_MS = 15_000;
+const QUIET_SHOWN = 3;
+const QUIET_ENDS = 6;
+const ALIVE_MISSES = 3;
 
 type Proposal = { ref: string; by: Who; text: string };
 
@@ -88,7 +93,12 @@ type Session = {
   recvSeq: number;
   inbox: Map<number, string>;
   gapSince?: number;
-  sent: Map<number, { payload: object; tries: number }>;
+  sent: Map<number, { payload: object; tries: number; at: number }>;
+  // Set once the peer has sent one valid alive. A 0.2.0 peer never does,
+  // and must not be ended for staying silent.
+  speaksAlive?: boolean;
+  lastHeard: number;
+  aliveMisses: number;
   title: string;
   items: Item[];
   createdAt: number;
@@ -157,6 +167,13 @@ export async function runNode(home: string) {
   let relayReady = false;
   let relayError: string | undefined;
   let retryMs = 2000;
+  let socketSince = 0;
+  let probe: { n: number; at: number } | undefined;
+  let probeCounter = 0;
+  let lastProbe = 0;
+  const aliveMs = (config.limits.aliveSeconds ?? 10) * 1000;
+  const probeEveryMs = 2 * aliveMs;
+  const probeWaitMs = aliveMs;
   let relayAnswered = () => {};
   const relayFirstAnswer = new Promise<void>((resolve) => (relayAnswered = resolve));
 
@@ -191,7 +208,10 @@ export async function runNode(home: string) {
   function connectRelay() {
     const ws = new WebSocket(relayUrl);
     socket = ws;
+    socketSince = Date.now();
+    probe = undefined;
     ws.onmessage = (ev) => {
+      if (socket !== ws) return;
       try {
         onRelay(JSON.parse(String(ev.data)));
       } catch (err) {
@@ -199,15 +219,52 @@ export async function runNode(home: string) {
       }
     };
     ws.onclose = (ev) => {
+      if (socket !== ws) return;
+      socket = undefined;
       relayReady = false;
       relayError = ev.reason || 'cannot reach it';
       relayAnswered();
       log(`relay connection closed (${ev.code} ${ev.reason}); retrying`);
       setTimeout(connectRelay, retryMs);
-      retryMs = Math.min(retryMs * 2, 60_000);
+      retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
     };
     ws.onerror = () => {};
   }
+
+  // A connection that died without a close (sleep, a network change) can
+  // take minutes to report it, so it is dropped here and replaced at once.
+  function replaceRelay(why: string) {
+    const old = socket;
+    socket = undefined;
+    relayReady = false;
+    relayError = why;
+    log(`relay connection replaced: ${why}`);
+    try {
+      old?.close();
+    } catch {}
+    connectRelay();
+  }
+
+  setInterval(() => {
+    if (!socket) return;
+    const now = Date.now();
+    if (!relayReady) {
+      if (now - socketSince > CONNECT_WAIT_MS) replaceRelay('the relay did not answer');
+    } else if (probe) {
+      if (now - probe.at > probeWaitMs) replaceRelay('the relay stopped answering');
+    } else if (now - lastProbe >= probeEveryMs) {
+      probe = { n: ++probeCounter, at: now };
+      lastProbe = now;
+      socket.send(
+        JSON.stringify({
+          t: 'send',
+          to: address,
+          ref: `probe:${probe.n}`,
+          payload: { probe: probe.n },
+        }),
+      );
+    }
+  }, 250);
 
   function onRelay(msg: any) {
     if (msg.t === 'challenge') {
@@ -226,8 +283,15 @@ export async function runNode(home: string) {
       log('connected to the relay as', msg.address);
       for (const queued of outbox.splice(0)) socket?.send(queued);
     } else if (msg.t === 'recv') {
+      if (msg.from === address) {
+        if (probe && msg.payload?.probe === probe.n) probe = undefined;
+        return;
+      }
       onPeer(msg.from, msg.payload);
     } else if (msg.t === 'undeliverable') {
+      if (typeof msg.ref === 'string' && msg.ref.startsWith('probe:')) {
+        return replaceRelay('the relay no longer knows this connection');
+      }
       onUndeliverable(msg.ref);
     }
   }
@@ -262,6 +326,12 @@ export async function runNode(home: string) {
     const s = current;
     if (!s || s.state === 'ended' || typeof ref !== 'string') return;
     if (ref === `ring:${s.id}`) return end(s, 'the other side is not online');
+    if (ref === `alive:${s.id}`) {
+      if (s.speaksAlive && ++s.aliveMisses >= ALIVE_MISSES) {
+        end(s, 'the other side went offline');
+      }
+      return;
+    }
     const [id, seq] = ref.split(':');
     const frame = id === s.id ? s.sent.get(Number(seq)) : undefined;
     if (!frame) return;
@@ -269,13 +339,62 @@ export async function runNode(home: string) {
       return end(s, 'the other side went offline');
     }
     setTimeout(() => {
-      if (current === s && s.state !== 'ended') {
+      if (current === s && s.state !== 'ended' && s.sent.get(Number(seq)) === frame) {
+        frame.at = Date.now();
         relaySend(s.peer.address, frame.payload, ref);
       }
     }, RESEND_MS);
   }
 
+  // Carried with no `signed` and no top-level `session`: a 0.2.0 node fails
+  // the session on an unknown signed kind, but drops this shape unread.
+  function sendAlive(s: Session) {
+    const alive = JSON.stringify({ session: s.id, have: s.recvSeq, at: new Date().toISOString() });
+    socket?.send(
+      JSON.stringify({
+        t: 'send',
+        to: s.peer.address,
+        ref: `alive:${s.id}`,
+        payload: { alive, sig: signText(me, alive) },
+      }),
+    );
+  }
+
+  function onAlive(s: Session, payload: any) {
+    if (!s.peer.publicKey || typeof payload.sig !== 'string') return;
+    if (!verifyText(s.peer.publicKey, payload.alive, payload.sig)) return;
+    let a: any;
+    try {
+      a = JSON.parse(payload.alive);
+    } catch {
+      return;
+    }
+    if (a?.session !== s.id || !Number.isInteger(a.have) || a.have < 0 || a.have > s.sendSeq) {
+      return;
+    }
+    const now = Date.now();
+    s.speaksAlive = true;
+    s.lastHeard = now;
+    s.aliveMisses = 0;
+    for (const [seq, frame] of s.sent) {
+      if (seq < a.have) s.sent.delete(seq);
+      else if (now - frame.at > aliveMs && relayReady) {
+        frame.at = now;
+        relaySend(s.peer.address, frame.payload, `${s.id}:${seq}`);
+      }
+    }
+  }
+
+  const quietFor = (s: Session) =>
+    s.speaksAlive && s.state !== 'ended' ? Date.now() - s.lastHeard : 0;
+
   function onPeer(from: string, payload: any) {
+    const s = current;
+    if (s && s.state !== 'ended' && from === s.peer.address) {
+      if (typeof payload?.alive === 'string') return onAlive(s, payload);
+      s.lastHeard = Date.now();
+      s.aliveMisses = 0;
+    }
     try {
       if (typeof payload?.signed === 'string') onControl(from, payload);
       else onFrame(from, payload);
@@ -417,6 +536,8 @@ export async function runNode(home: string) {
       items: [],
       createdAt: Date.now(),
       lastActivity: Date.now(),
+      lastHeard: Date.now(),
+      aliveMisses: 0,
       entries: 0,
       hungUp: {},
     };
@@ -462,7 +583,7 @@ export async function runNode(home: string) {
       seq,
       sealed: seal(s.keys.send, seq, JSON.stringify({ raw, sig })),
     };
-    s.sent.set(seq, { payload, tries: 0 });
+    s.sent.set(seq, { payload, tries: 0, at: Date.now() });
     relaySend(s.peer.address, payload, `${s.id}:${seq}`);
     record(s, raw, sig);
     apply(s, entry, 'me');
@@ -734,6 +855,9 @@ export async function runNode(home: string) {
           dropReason: i.dropReason,
         })),
         endedReason: s.state === 'ended' ? s.endReason : undefined,
+        peerQuietSeconds: quietFor(s) >= QUIET_SHOWN * aliveMs
+          ? Math.round(quietFor(s) / 1000)
+          : undefined,
         minutes:
           s.state === 'ended' && s.activeSince
             ? join(s.dir, 'minutes.md')
@@ -1009,6 +1133,15 @@ export async function runNode(home: string) {
       fail(s, err);
     }
   }, 1000);
+
+  setInterval(() => {
+    const s = current;
+    if (!s || !s.keys || s.state === 'ended') return;
+    if (quietFor(s) >= QUIET_ENDS * aliveMs) {
+      return end(s, 'the other side stopped answering');
+    }
+    if (relayReady) sendAlive(s);
+  }, aliveMs);
 
   connectRelay();
 }
