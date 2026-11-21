@@ -13436,7 +13436,7 @@ function datetime2(params) {
   return _isoDateTime(ZodISODateTime, params);
 }
 // src/types.ts
-var VERSION = "0.2.0";
+var VERSION = "0.3.0";
 var LIMITS = {
   name: 60,
   title: 200,
@@ -22276,6 +22276,9 @@ function renderView(v) {
   if (s.state === "awaiting_approval" && s.role === "callee") {
     lines.push(s.peer.knownSince ? `First connected to this address on ${s.peer.knownSince.slice(0, 10)}.` : "This address has not connected here before.");
   }
+  if (s.peerQuietSeconds !== undefined) {
+    lines.push(`Nothing has been heard from the other side for ${s.peerQuietSeconds} seconds; it may be offline.`);
+  }
   if (s.withheld) {
     lines.push("What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.");
   }
@@ -23234,6 +23237,11 @@ var GAP_WAIT_MS = 60000;
 var RESEND_MS = 3000;
 var RESEND_TRIES = 20;
 var INBOX_MAX = 100;
+var RETRY_MAX_MS = 15000;
+var CONNECT_WAIT_MS = 15000;
+var QUIET_SHOWN = 3;
+var QUIET_ENDS = 6;
+var ALIVE_MISSES = 3;
 
 class ProtocolError extends Error {
 }
@@ -23278,6 +23286,13 @@ async function runNode(home) {
   let relayReady = false;
   let relayError;
   let retryMs = 2000;
+  let socketSince = 0;
+  let probe;
+  let probeCounter = 0;
+  let lastProbe = 0;
+  const aliveMs = (config.limits.aliveSeconds ?? 10) * 1000;
+  const probeEveryMs = 2 * aliveMs;
+  const probeWaitMs = aliveMs;
   let relayAnswered = () => {};
   const relayFirstAnswer = new Promise((resolve) => relayAnswered = resolve);
   try {
@@ -23308,7 +23323,11 @@ async function runNode(home) {
   function connectRelay() {
     const ws = new WebSocket(relayUrl);
     socket = ws;
+    socketSince = Date.now();
+    probe = undefined;
     ws.onmessage = (ev) => {
+      if (socket !== ws)
+        return;
       try {
         onRelay(JSON.parse(String(ev.data)));
       } catch (err) {
@@ -23316,15 +23335,50 @@ async function runNode(home) {
       }
     };
     ws.onclose = (ev) => {
+      if (socket !== ws)
+        return;
+      socket = undefined;
       relayReady = false;
       relayError = ev.reason || "cannot reach it";
       relayAnswered();
       log(`relay connection closed (${ev.code} ${ev.reason}); retrying`);
       setTimeout(connectRelay, retryMs);
-      retryMs = Math.min(retryMs * 2, 60000);
+      retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
     };
     ws.onerror = () => {};
   }
+  function replaceRelay(why) {
+    const old = socket;
+    socket = undefined;
+    relayReady = false;
+    relayError = why;
+    log(`relay connection replaced: ${why}`);
+    try {
+      old?.close();
+    } catch {}
+    connectRelay();
+  }
+  setInterval(() => {
+    if (!socket)
+      return;
+    const now = Date.now();
+    if (!relayReady) {
+      if (now - socketSince > CONNECT_WAIT_MS)
+        replaceRelay("the relay did not answer");
+    } else if (probe) {
+      if (now - probe.at > probeWaitMs)
+        replaceRelay("the relay stopped answering");
+    } else if (now - lastProbe >= probeEveryMs) {
+      probe = { n: ++probeCounter, at: now };
+      lastProbe = now;
+      socket.send(JSON.stringify({
+        t: "send",
+        to: address,
+        ref: `probe:${probe.n}`,
+        payload: { probe: probe.n }
+      }));
+    }
+  }, 250);
   function onRelay(msg) {
     if (msg.t === "challenge") {
       socket?.send(JSON.stringify({
@@ -23335,14 +23389,24 @@ async function runNode(home) {
     } else if (msg.t === "ready") {
       relayReady = true;
       relayError = undefined;
+      if (current && current.state !== "ended")
+        current.lastHeard = Date.now();
       retryMs = 2000;
       relayAnswered();
       log("connected to the relay as", msg.address);
       for (const queued of outbox.splice(0))
         socket?.send(queued);
     } else if (msg.t === "recv") {
+      if (msg.from === address) {
+        if (probe && msg.payload?.probe === probe.n)
+          probe = undefined;
+        return;
+      }
       onPeer(msg.from, msg.payload);
     } else if (msg.t === "undeliverable") {
+      if (typeof msg.ref === "string" && msg.ref.startsWith("probe:")) {
+        return replaceRelay("the relay no longer knows this connection");
+      }
       onUndeliverable(msg.ref);
     }
   }
@@ -23369,6 +23433,12 @@ async function runNode(home) {
       return;
     if (ref === `ring:${s.id}`)
       return end(s, "the other side is not online");
+    if (ref === `alive:${s.id}`) {
+      if (s.speaksAlive && ++s.aliveMisses >= ALIVE_MISSES) {
+        end(s, "the other side went offline");
+      }
+      return;
+    }
     const [id, seq] = ref.split(":");
     const frame = id === s.id ? s.sent.get(Number(seq)) : undefined;
     if (!frame)
@@ -23377,12 +23447,57 @@ async function runNode(home) {
       return end(s, "the other side went offline");
     }
     setTimeout(() => {
-      if (current === s && s.state !== "ended") {
+      if (current === s && s.state !== "ended" && s.sent.get(Number(seq)) === frame) {
+        frame.at = Date.now();
         relaySend(s.peer.address, frame.payload, ref);
       }
     }, RESEND_MS);
   }
+  function sendAlive(s) {
+    const alive = JSON.stringify({ session: s.id, have: s.recvSeq, at: new Date().toISOString() });
+    socket?.send(JSON.stringify({
+      t: "send",
+      to: s.peer.address,
+      ref: `alive:${s.id}`,
+      payload: { alive, sig: signText(me, alive) }
+    }));
+  }
+  function onAlive(s, payload) {
+    if (!s.peer.publicKey || typeof payload.sig !== "string")
+      return;
+    if (!verifyText(s.peer.publicKey, payload.alive, payload.sig))
+      return;
+    let a;
+    try {
+      a = JSON.parse(payload.alive);
+    } catch {
+      return;
+    }
+    if (a?.session !== s.id || !Number.isInteger(a.have) || a.have < 0 || a.have > s.sendSeq) {
+      return;
+    }
+    const now = Date.now();
+    s.speaksAlive = true;
+    s.lastHeard = now;
+    s.aliveMisses = 0;
+    for (const [seq, frame] of s.sent) {
+      if (seq < a.have)
+        s.sent.delete(seq);
+      else if (now - frame.at > aliveMs && relayReady) {
+        frame.at = now;
+        relaySend(s.peer.address, frame.payload, `${s.id}:${seq}`);
+      }
+    }
+  }
+  const quietFor = (s) => s.speaksAlive && s.state !== "ended" && relayReady ? Date.now() - s.lastHeard : 0;
   function onPeer(from, payload) {
+    const s = current;
+    if (s && s.state !== "ended" && from === s.peer.address) {
+      if (typeof payload?.alive === "string")
+        return onAlive(s, payload);
+      s.lastHeard = Date.now();
+      s.aliveMisses = 0;
+    }
     try {
       if (typeof payload?.signed === "string")
         onControl(from, payload);
@@ -23492,6 +23607,8 @@ async function runNode(home) {
       items: [],
       createdAt: Date.now(),
       lastActivity: Date.now(),
+      lastHeard: Date.now(),
+      aliveMisses: 0,
       entries: 0,
       hungUp: {}
     };
@@ -23530,7 +23647,7 @@ async function runNode(home) {
       seq,
       sealed: seal(s.keys.send, seq, JSON.stringify({ raw, sig }))
     };
-    s.sent.set(seq, { payload, tries: 0 });
+    s.sent.set(seq, { payload, tries: 0, at: Date.now() });
     relaySend(s.peer.address, payload, `${s.id}:${seq}`);
     record(s, raw, sig);
     apply(s, entry, "me");
@@ -23756,6 +23873,7 @@ async function runNode(home) {
           dropReason: i.dropReason
         })),
         endedReason: s.state === "ended" ? s.endReason : undefined,
+        peerQuietSeconds: quietFor(s) >= QUIET_SHOWN * aliveMs ? Math.round(quietFor(s) / 1000) : undefined,
         minutes: s.state === "ended" && s.activeSince ? join7(s.dir, "minutes.md") : undefined
       }
     };
@@ -24017,6 +24135,16 @@ async function runNode(home) {
       fail(s, err);
     }
   }, 1000);
+  setInterval(() => {
+    const s = current;
+    if (!s || !s.keys || s.state === "ended")
+      return;
+    if (quietFor(s) >= QUIET_ENDS * aliveMs) {
+      return end(s, "the other side stopped answering");
+    }
+    if (relayReady)
+      sendAlive(s);
+  }, aliveMs);
   connectRelay();
 }
 
@@ -24180,6 +24308,9 @@ function renderView2(v) {
   lines.push(`Session with ${who2(s)}: ${STATE_TEXT2[s.state]}${s.endedReason ? ` (${s.endedReason})` : ""}.`);
   if (s.state === "awaiting_approval" && s.role === "callee") {
     lines.push(s.peer.knownSince ? `First connected to this address on ${s.peer.knownSince.slice(0, 10)}.` : "This address has not connected here before.");
+  }
+  if (s.peerQuietSeconds !== undefined) {
+    lines.push(`Nothing has been heard from the other side for ${s.peerQuietSeconds} seconds; it may be offline.`);
   }
   if (s.withheld) {
     lines.push("What the caller calls itself and its agenda are shown to your user where they answer. You are given them once your user accepts.");
