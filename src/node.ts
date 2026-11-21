@@ -278,6 +278,7 @@ export async function runNode(home: string) {
     } else if (msg.t === 'ready') {
       relayReady = true;
       relayError = undefined;
+      if (current && current.state !== 'ended') current.lastHeard = Date.now();
       retryMs = 2000;
       relayAnswered();
       log('connected to the relay as', msg.address);
@@ -385,8 +386,10 @@ export async function runNode(home: string) {
     }
   }
 
+  // Silence only counts while this side can hear: with its own relay link
+  // down, the fault is here, not with the other side.
   const quietFor = (s: Session) =>
-    s.speaksAlive && s.state !== 'ended' ? Date.now() - s.lastHeard : 0;
+    s.speaksAlive && s.state !== 'ended' && relayReady ? Date.now() - s.lastHeard : 0;
 
   function onPeer(from: string, payload: any) {
     const s = current;
