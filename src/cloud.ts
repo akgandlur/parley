@@ -16,7 +16,7 @@ const RETRY_MS = [2000, 5000, 15_000, 60_000];
 const HEARTBEAT_MS = 30_000;
 const BATCH_BYTES = 200_000;
 const RENEW_LEFT_MS = 18 * 3600_000;
-const CHECK_MS = 10 * 60_000;
+const CHECK_MS = 2 * 60_000;
 const UNLINKED_CHECK_MS = 30_000;
 
 export type AttestFile = { att: string; issuer: string; sync: boolean; fetchedAt: string };

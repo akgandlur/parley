@@ -23223,7 +23223,7 @@ var RETRY_MS = [2000, 5000, 15000, 60000];
 var HEARTBEAT_MS = 30000;
 var BATCH_BYTES = 200000;
 var RENEW_LEFT_MS = 18 * 3600000;
-var CHECK_MS = 10 * 60000;
+var CHECK_MS = 2 * 60000;
 var UNLINKED_CHECK_MS = 30000;
 var originOf = (url) => {
   const parsed = new URL(url);
