@@ -13436,7 +13436,7 @@ function datetime2(params) {
   return _isoDateTime(ZodISODateTime, params);
 }
 // src/types.ts
-var VERSION = "0.3.0";
+var VERSION = "0.4.0";
 var LIMITS = {
   name: 60,
   title: 200,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 export type Who = 'me' | 'peer';
 
