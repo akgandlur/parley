@@ -863,7 +863,7 @@ export async function runNode(home: string) {
       item: 'item' in e ? e.item : e.type === 'add_item' ? e.id : undefined,
       text:
         e.type === 'left'
-          ? `${nameOf(s, e.side)}: ${e.reason}`
+          ? `${nameOf(s, e.side)} left: ${e.reason}`
           : 'text' in e ? e.text : 'reason' in e ? e.reason : 'title' in e ? e.title : undefined,
       ref: e.type === 'propose' ? `${lead}:${e.seq}` : 'ref' in e ? e.ref : undefined,
     });

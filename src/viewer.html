@@ -173,6 +173,22 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      .side {
+        border-top: 1px solid var(--line);
+        padding: 10px 0;
+      }
+      .side .item-head code {
+        font: 12.5px var(--mono);
+        color: var(--muted);
+      }
+      .sides {
+        margin-bottom: 28px;
+      }
+      .votes {
+        margin: 4px 0 0 30px;
+        font-size: 12.5px;
+        color: var(--muted);
+      }
       .feed {
         display: flex;
         flex-direction: column;
@@ -288,6 +304,10 @@
 
       <div class="cols" id="cols" hidden>
         <aside class="agenda">
+          <div class="sides" id="sides-box" hidden>
+            <h2>Sides</h2>
+            <div id="sides"></div>
+          </div>
           <h2>Agenda</h2>
           <p class="title" id="title"></p>
           <div id="items"></div>
@@ -303,6 +323,7 @@
       const $ = (id) => document.getElementById(id);
       let after = 0;
       let sessionId = null;
+      let agreements = new Map();
 
       // Everything the other side wrote arrives here as text and is only ever
       // placed with textContent.
@@ -316,9 +337,45 @@
       const clock = (at) =>
         new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+      const sideOf = (s, id) => s.sides.find((x) => x.id === id);
+      const nameOf = (x) => (x ? x.savedAs || x.name || x.address : 'Someone');
+      const names = (list) =>
+        list.length < 2 ? list.join('') : list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1];
+
+      function groupHeadline(s) {
+        const others = names(s.sides.filter((x) => !x.you && !x.left).map(nameOf));
+        const caller = sideOf(s, 'a');
+        switch (s.state) {
+          case 'dialing':
+            return ['wait', 'Calling ' + others + '…', ''];
+          case 'ringing':
+            return ['wait', 'Incoming call…', caller.address];
+          case 'awaiting_approval':
+            return s.role === 'caller'
+              ? ['wait', 'Waiting for people to accept', 'Your Claude called ' + others + '.']
+              : [
+                  'wait',
+                  nameOf(caller) + ' is calling',
+                  'Waiting for you to accept. ' +
+                    caller.address +
+                    '. ' +
+                    (caller.knownSince
+                      ? 'First connected on ' + caller.knownSince.slice(0, 10) + '.'
+                      : 'This address has not connected here before.'),
+                ];
+          case 'active':
+            return ['live', 'Connected with ' + others, ''];
+          case 'closing':
+            return ['wait', 'Ending…', ''];
+          default:
+            return ['', 'Ended: ' + s.endedReason, ''];
+        }
+      }
+
       function headline(view) {
         const s = view.session;
         if (!s) return ['', 'No call yet', 'This page updates by itself when your Claude calls or is called.'];
+        if (s.sides) return groupHeadline(s);
         const them = s.peer.name ? s.peer.name : s.peer.address;
         const known = s.peer.knownSince
           ? 'First connected on ' + s.peer.knownSince.slice(0, 10) + '.'
@@ -341,7 +398,38 @@
         }
       }
 
+      function renderSides(s) {
+        $('sides-box').hidden = !s.sides;
+        if (!s.sides) return;
+        $('sides').replaceChildren(
+          ...s.sides.map((x) => {
+            const row = el('div', 'side');
+            const head = el('div', 'item-head');
+            const name = el('span', 'item-title', x.you ? x.name : nameOf(x) + ' ');
+            if (!x.you && !x.savedAs) name.append(el('code', '', x.address));
+            head.append(el('span', 'id', x.id), name);
+            if (x.you) head.append(el('span', 'chip', 'you'));
+            if (x.left) head.append(el('span', 'chip dropped', 'left'));
+            row.append(head);
+            if (x.left) row.append(el('div', 'outcome', x.left));
+            return row;
+          }),
+        );
+      }
+
+      const called = (s, id) => (sideOf(s, id)?.you ? 'you' : nameOf(sideOf(s, id)));
+
+      function proposal(s, text, by, agreedBy) {
+        const box = el('div');
+        box.append(el('div', 'outcome', text));
+        const line = ['Proposed by ' + called(s, by)];
+        if (agreedBy) line.push(agreedBy.length ? 'agreed by ' + names(agreedBy.map((id) => called(s, id))) : 'no one has agreed yet');
+        box.append(el('div', 'votes', line.join(' · ')));
+        return box;
+      }
+
       function renderAgenda(s) {
+        renderSides(s);
         $('title').textContent = s.title;
         const items = $('items');
         items.replaceChildren();
@@ -350,7 +438,11 @@
           const head = el('div', 'item-head');
           head.append(el('span', 'id', i.id), el('span', 'item-title', i.title), el('span', 'chip ' + i.state, i.state));
           row.append(head);
-          if (i.agreed) row.append(el('div', 'outcome', i.agreed.text));
+          if (s.sides && i.agreed) row.append(proposal(s, i.agreed.text, i.agreed.proposedById));
+          else if (s.sides && i.state === 'open') {
+            if (i.mine) row.append(proposal(s, i.mine.text, i.mine.ref.split(':')[0], [...(agreements.get(i.mine.ref) ?? [])]));
+            for (const o of i.others ?? []) row.append(proposal(s, o.text, o.by, o.agreedBy));
+          } else if (i.agreed) row.append(el('div', 'outcome', i.agreed.text));
           else if (i.state === 'dropped') row.append(el('div', 'outcome', i.dropReason));
           items.append(row);
         }
@@ -358,8 +450,9 @@
 
       function renderEntry(f, s) {
         const mine = f.by === 'me';
-        const who = mine ? 'Your Claude' : s.peer.name || 'The other side';
-        const person = mine ? 'You' : (s.peer.name || 'The other side') + "'s person";
+        const them = s.sides ? nameOf(sideOf(s, f.author)) : s.peer.name || 'The other side';
+        const who = mine ? 'Your Claude' : them;
+        const person = mine ? 'You' : them + "'s person";
         const note = (text) => {
           const node = el('div', 'note');
           node.append(el('time', '', clock(f.at)), document.createTextNode(text));
@@ -375,13 +468,17 @@
           case 'add_item':
             return note(who + ' added ' + f.item + ': ' + f.text);
           case 'agree':
+            if (s.sides) {
+              const by = f.ref.split(':')[0];
+              return note(who + ' agreed to ' + (sideOf(s, by)?.you ? 'your' : called(s, by) + '’s') + ' ' + f.ref + ' on ' + f.item);
+            }
             return note(who + ' agreed to ' + f.ref + '. ' + f.item + ' is settled');
           case 'drop':
             return note(who + ' dropped ' + f.item + ': ' + f.text);
           case 'hangup':
-            return note(who + ' hung up: ' + f.text);
+            return note(who + (s.sides && f.author !== 'a' ? ' left: ' : ' hung up: ') + f.text);
           case 'left':
-            return note('Left the session: ' + f.text);
+            return note(f.text);
         }
         const msg = el('div', 'msg' + (mine ? ' mine' : '') + (f.type === 'propose' ? ' propose' : ''));
         const meta = el('div', 'meta');
@@ -411,7 +508,11 @@
         const feed = $('feed');
         if (s.id !== sessionId) {
           sessionId = s.id;
+          agreements = new Map();
           feed.replaceChildren(el('div', 'empty', 'Nothing said yet.'));
+        }
+        for (const f of entries) {
+          if (f.type === 'agree') agreements.set(f.ref, [...(agreements.get(f.ref) ?? []), f.author]);
         }
         renderAgenda(s);
         if (!entries.length) return;
