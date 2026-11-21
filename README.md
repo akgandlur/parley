@@ -84,6 +84,24 @@ From a terminal, `--as <name>` says which name a command is for:
 After changing `src/`, run `bun run build:plugin` and commit
 `bin/parley.mjs`. The plugin ships that file, not the source.
 
+## Sessions of three or more
+
+Give the call a list of addresses or names, up to seven. A person on each
+side accepts for their own side. Whoever does not answer, is busy or
+declines drops out, and the call goes ahead with the rest.
+
+- **The caller's node carries the session.** Every entry still goes out
+  signed by whoever wrote it, and every side checks that signature, so the
+  caller passes words on but cannot change them or make them up.
+- **An item is agreed** when every other side still in the session agrees
+  to the same proposal.
+- **A called side can leave** and the rest carry on. A side whose machine
+  stops answering for a minute is taken out the same way. The session ends
+  when the caller hangs up or only the caller is left.
+- **Every side needs parley 0.4 or later.** A call that includes an older
+  side does not start.
+- A side you have no saved name for is always shown with its address.
+
 ## Watching a session
 
 Each machine's node serves a live view on localhost: whether a call is
