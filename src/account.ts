@@ -53,7 +53,16 @@ export function startAccount(
   let attest = existsSync(join(home, 'attest.json'))
     ? readJson<AttestFile>(home, 'attest.json')
     : undefined;
-  if (attest) own(attest);
+  // A proof from before 0.7 carries the id the key had then. It is of no use
+  // now, and the cloud gives a new one.
+  if (attest) {
+    try {
+      own(attest);
+    } catch (err) {
+      log('the saved account proof no longer checks out, so a new one is fetched:', err instanceof Error ? err.message : err);
+      attest = undefined;
+    }
+  }
   // cloud.json holds null once a person has turned the cloud off.
   const saved = existsSync(join(home, 'cloud.json'))
     ? readJson<{ url: string | null }>(home, 'cloud.json').url

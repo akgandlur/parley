@@ -10,7 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ServerWebSocket } from 'bun';
 import { addressOf, newIdentity, openFor, sealTo, signText, verifyText, type Identity } from '../src/crypto';
-import { makeAttestation } from '../src/attest';
+import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Contact } from '../src/home';
 import { MAX_PER_IP, RELAY_AUTH, startRelay } from '../src/relay';
 import { VERSION } from '../src/types';
@@ -401,6 +401,32 @@ async function accounts() {
   const sent = await mia.tool('send_message', { to: nedAddr, message: 'between accounts' });
   check('linked names message each other', !sent.failed, sent);
   check('the message shows the sender\'s verified domain', nedSock.texts()[0]?.startsWith(`parley message from "Mia" (${miaAddr}, verified · mia.example):`), nedSock.texts());
+
+  console.log('\n# a name linked before 0.7, in the folder layout of 0.1');
+  const olaRoot = join(base, 'machine-o');
+  const ola = newIdentity('Ola');
+  const olaAddr = addressOf(ola.publicKey);
+  writeJson(olaRoot, 'identity.json', ola, true);
+  writeJson(olaRoot, 'config.json', { relay: 'wss://relay.invalid', approval: 'dialog', limits: { idleMinutes: 15 } });
+  writeJson(olaRoot, 'cloud.json', { url: stub.url });
+  writeJson(olaRoot, 'claims.json', { 'k7fq-m2xa-9tzp': { pid: 1, session: 'session-ola', dir: '/somewhere' } });
+  const iat = unix();
+  const stale = JSON.stringify({ v: 1, key: ola.publicKey, address: 'k7fq-m2xa-9tzp', sub: 'acct-ola', domain: 'ola.example', kind: 'account', iat, exp: iat + 86400 });
+  writeJson(olaRoot, 'attest.json', { att: `${Buffer.from(stale).toString('base64url')}.${signText(cloudIssuer, 'parley-attest\n' + stale)}`, issuer: cloudIssuer.publicKey, sync: true, fetchedAt: new Date().toISOString() });
+  stub.accounts.set(ola.publicKey, { sub: 'acct-ola', domain: 'ola.example' });
+  const olaSession = await agent(olaRoot, 'session-ola', env);
+  const unnamedYet = await olaSession.tool('list_agents');
+  check('the session is told its name is free to take again', unnamedYet.failed && unnamedYet.text.includes(`"Ola" (${olaAddr}): free`), unnamedYet);
+  const taken = await olaSession.tool('setup', { name: 'Ola' });
+  check('it takes the name, with the id its key has now', !taken.failed && taken.text.includes(`"Ola" (${olaAddr})`), taken);
+  const olaOn = await eventually(async () => {
+    const r = await olaSession.tool('list_agents');
+    return r.text.includes('Connected to the relay.') ? r : undefined;
+  }, 20_000);
+  check('the proof saved under the old id is replaced, and it connects verified', olaOn?.text.includes('verified · ola.example') && readAttestation(readJson<{ att: string }>(olaRoot, 'attest.json').att, [cloudIssuer.publicKey], ola.publicKey).address === olaAddr, olaOn);
+  const toOla = await mia.tool('send_message', { to: olaAddr, message: 'to an upgraded name' });
+  check('and it can be messaged', !toOla.failed, toOla);
+  await olaSession.close();
 
   stub.accounts.set(key('machine-m', miaAddr), { sub: 'acct-mia', domain: 'mia.example', banned: true });
   await mia.close();

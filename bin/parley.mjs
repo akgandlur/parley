@@ -22002,8 +22002,14 @@ ${me.name}`)
 function startAccount(home, me, log, renewed) {
   const own = (f) => readAttestation(f.att, [f.issuer], me.publicKey, 0);
   let attest = existsSync3(join3(home, "attest.json")) ? readJson(home, "attest.json") : undefined;
-  if (attest)
-    own(attest);
+  if (attest) {
+    try {
+      own(attest);
+    } catch (err) {
+      log("the saved account proof no longer checks out, so a new one is fetched:", err instanceof Error ? err.message : err);
+      attest = undefined;
+    }
+  }
   const saved = existsSync3(join3(home, "cloud.json")) ? readJson(home, "cloud.json").url : undefined;
   let url = saved === null ? undefined : saved ?? (attest ? undefined : process.env.PARLEY_CLOUD);
   if (url && saved === undefined) {
@@ -22125,7 +22131,7 @@ var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.7.0";
+var VERSION = "0.7.1";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
