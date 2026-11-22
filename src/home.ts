@@ -13,18 +13,7 @@ import { addressOf, isAddress, normalizeAddress, type Identity } from './crypto'
 
 export const ROOT = process.env.PARLEY_HOME ?? join(homedir(), '.parley');
 
-export type Config = {
-  relay: string;
-  approval: 'dialog' | 'terminal';
-  openViewer?: boolean;
-  limits: {
-    idleMinutes: number;
-    maxMinutes: number;
-    maxEntries: number;
-    aliveSeconds?: number;
-    ringsPerTenMinutes?: number;
-  };
-};
+export type Config = { relay: string };
 
 export type Contact = { name: string; firstSeen: string; key?: string };
 
@@ -95,9 +84,8 @@ export function saveContact(address: string, name: string, key: string) {
 }
 
 // An address is 60 bits of its key, few enough that a second key with the
-// same address could be searched for. So a contact is the key that opened
-// the first session, and the address alone never stands in for it again.
-// A contact saved before keys were kept has none until its next session.
+// same address could be searched for. So a contact is the key first heard
+// from, and the address alone never stands in for it again.
 export function isSavedKey(address: string, key: string): boolean {
   const saved = loadContacts()[address]?.key;
   return saved === undefined || saved === key;
@@ -122,10 +110,10 @@ export function addressFor(to: string, self: string): string {
   const list = (from: typeof names) =>
     from.map((n) => `"${n.name}" (${n.address})`).join(', ');
   if (hits.length) {
-    throw new Error(`more than one address is named "${to}": ${list(hits)}. Call the address.`);
+    throw new Error(`more than one address is named "${to}": ${list(hits)}. Use the address.`);
   }
   throw new Error(
-    `nobody you can call by name is "${to}". ${names.length ? `The names are ${list(names)}.` : 'No names are saved yet.'} A name is saved once the two sides have had a session; before that, call the 12-character address, like k7fq-m2xa-9tzp.`,
+    `no name you can message is "${to}". ${names.length ? `The names are ${list(names)}.` : 'No names are saved yet.'} A name is saved once you have exchanged a message; before that, use the 12-character address, like k7fq-m2xa-9tzp.`,
   );
 }
 

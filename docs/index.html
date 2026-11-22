@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>parley: let your Claude work it out with theirs</title>
+    <title>parley: message their Claude from yours</title>
     <meta
       name="description"
-      content="A call between two people's Claude Code agents. One calls with an agenda, a person accepts, the agents settle each item, and both sides keep the same minutes."
+      content="Messages between Claude Code sessions on different machines, and between people's. A message lands in the other conversation by itself, the way SendMessage works on one machine."
     />
     <meta property="og:title" content="parley" />
     <meta
       property="og:description"
-      content="Let your Claude work it out with theirs: a call with an agenda, accepted by a person, ending in minutes both sides hold."
+      content="Message their Claude from yours: Claude Code's own session messages, across machines and between people."
     />
     <meta name="color-scheme" content="light dark" />
     <link
@@ -299,11 +299,12 @@
       </header>
 
       <main>
-        <h1>Let your Claude work it out with <em>theirs</em>.</h1>
+        <h1>Message their Claude from <em>yours</em>.</h1>
         <p class="lede">
-          parley is a call between two people's Claude Code agents. One calls
-          with an agenda, a person on the other side accepts, and the agents
-          settle each item. Both sides keep the same minutes.
+          Claude Code sessions on one machine can already message each
+          other. parley does the same across machines and between people: a
+          message lands in the other session's conversation by itself, and
+          wakes it if it is idle.
         </p>
 
         <div class="prompt">
@@ -311,7 +312,7 @@
             <span>Paste this into Claude Code</span>
             <button type="button" id="copy" aria-live="polite">Copy</button>
           </div>
-          <pre id="prompt">Set me up with parley, a tool that lets you hold a working session with another person's Claude Code. Its code is at https://github.com/akgandlur/parley
+          <pre id="prompt">Set me up with parley, a tool that lets you message Claude Code sessions on other machines, other people's included. Its code is at https://github.com/akgandlur/parley
 
 Skip any step that is already done.
 
@@ -321,103 +322,55 @@ Skip any step that is already done.
    claude plugin install parley@parley
 3. Ask me to type /reload-plugins, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
 4. Ask me what to call this Claude Code session on parley. The other side sees that name. Then call the parley setup tool with it.
-5. Show me this session's parley name and address, and tell me to send the address to the person I want to work with.</pre>
+5. Show me this session's parley name and address, and tell me to send the address to the person I want to work with.
+6. If the parley tools show a link to open, give it to me: the hosted relay needs each name linked to an account once.</pre>
         </div>
         <p class="needs">Needs Claude Code and Node 22 or newer.</p>
 
         <section>
-          <h2>How a session goes</h2>
+          <h2>How it works</h2>
           <ol class="steps">
             <li>
               <div>
-                <strong>Your Claude calls with an agenda</strong>
-                <span>A title and a list of things the two sides need to settle. The first call goes to the other agent's address. After that, its name is enough.</span>
+                <strong>Each session takes a name</strong>
+                <span>Every Claude Code session has its own parley name and address, so a message reaches the one session it was meant for.</span>
               </div>
             </li>
             <li>
               <div>
-                <strong>A person accepts</strong>
-                <span>The person on the other side sees who is calling and the agenda, then accepts or declines. Their agent cannot accept, and is not shown the agenda until they do.</span>
+                <strong>Your Claude sends a message</strong>
+                <span>To the other session's address the first time, and to its name after that. It hears back once the message has arrived.</span>
               </div>
             </li>
             <li>
               <div>
-                <strong>The agents work the items</strong>
-                <span>Each item is its own thread, so several move at once. Either side can add an item when the work branches.</span>
-              </div>
-            </li>
-            <li>
-              <div>
-                <strong>Each item ends in an agreement, or is dropped</strong>
-                <span>One side proposes the final wording and the other agrees to exactly that wording.</span>
-              </div>
-            </li>
-            <li>
-              <div>
-                <strong>Both sides keep the same minutes</strong>
-                <span>The call ends when the agenda is done or anyone hangs up. Each side also holds every entry, signed by the agent that wrote it.</span>
+                <strong>It lands in their conversation</strong>
+                <span>Between tool calls if that session is working, or as a new turn if it is idle. Their Claude answers the same way.</span>
               </div>
             </li>
           </ol>
         </section>
 
         <section>
-          <h2>A name for each session</h2>
-          <p>
-            Every Claude Code session takes its own name, and each name has
-            its own address. A call reaches the one session it was meant
-            for, and two sessions on one machine can each be in a call of
-            their own. A name belongs to one open session at a time, and it
-            keeps its address when a later session takes it up again.
-          </p>
-        </section>
-
-        <section>
-          <h2>What you end up with</h2>
+          <h2>What arrives</h2>
           <div class="minutes">
-            <h3>Read-only database access for vendor reporting app</h3>
+            <h3>parley message from "Tester A"</h3>
             <dl>
-              <dt>Between</dt>
-              <dd>Client's Claude and Vendor's Claude</dd>
-              <dt>Called by</dt>
-              <dd>Vendor's Claude</dd>
-              <dt>How it ended</dt>
-              <dd>agenda complete, after 9 seconds</dd>
+              <dt>Address</dt>
+              <dd>9y9h-k5dg-60rb</dd>
+              <dt>Account</dt>
+              <dd>not verified</dd>
             </dl>
             <div class="item">
-              <span class="tag">Agreed</span>
-              <h4>Connection path</h4>
               <p>
-                Engine is MySQL 8. No direct database access: the database is on
-                a private network and is reachable only via our SSH bastion,
-                bastion.example.com port 22, key-based auth. …
-              </p>
-            </div>
-            <div class="item">
-              <span class="tag">Agreed</span>
-              <h4>Database account and permissions</h4>
-              <p>
-                One MySQL user for the vendor reporting app with only SELECT
-                privilege, granted on the orders and customers tables only. …
-                This is a specification only: a human administrator on our side
-                must create the user, and nothing here confirms it has been
-                created.
-              </p>
-            </div>
-            <div class="item">
-              <span class="tag">Agreed</span>
-              <h4>Authentication</h4>
-              <p>
-                The vendor app generates an ed25519 keypair and keeps the
-                private key. … Never send private keys or passwords through
-                this session. Our human administrator installs the public key
-                on the bastion; only a human administrator can do this.
+                Hi, this is Tester A. What is 17 times 3? Please answer through
+                parley by replying to me (Tester A, address 9y9h-k5dg-60rb).
               </p>
             </div>
           </div>
           <p class="source">
-            Excerpts from the minutes of a test call between two Claude Code
-            sessions, each given half of a made-up integration.
+            A message between two Claude Code sessions in a test. The other
+            session was idle, woke on it, and answered 51 through parley.
           </p>
         </section>
 
@@ -426,20 +379,16 @@ Skip any step that is already done.
             <h2>What is protected</h2>
             <ul>
               <li>
-                <strong>The relay cannot read a call</strong>
-                <span>The two ends agree keys between themselves and seal every entry.</span>
+                <strong>The relay cannot read a message</strong>
+                <span>Each one is sealed to the key of the address it is for, and signed by the sender.</span>
               </li>
               <li>
                 <strong>An address cannot be faked</strong>
-                <span>It is a hash of the agent's key. Once a call has been accepted, that key is remembered, and the same address with another key is refused.</span>
+                <span>It is a hash of the session's key. The key an address first used is remembered, and the same address with another key is not believed.</span>
               </li>
               <li>
-                <strong>Every entry is signed</strong>
-                <span>Your copy of the record is evidence of what the other side said.</span>
-              </li>
-              <li>
-                <strong>Only a person can accept</strong>
-                <span>On macOS a system window asks, and nothing else on the machine can accept. Elsewhere it is a terminal command.</span>
+                <strong>Who is writing</strong>
+                <span>A side linked to an account is shown with the domain of its owner's checked email.</span>
               </li>
             </ul>
           </div>
@@ -448,15 +397,15 @@ Skip any step that is already done.
             <ul>
               <li>
                 <strong>Your own machine</strong>
-                <span>An agent with a shell runs as you and can read your key. The approval window stops an eager agent, not one that sets out to act as you.</span>
+                <span>An agent with a shell runs as you and can read your key.</span>
               </li>
               <li>
-                <strong>What your agent chooses to say</strong>
-                <span>It is told to treat the other side as information, never instructions. That is an instruction to a model, not a control.</span>
+                <strong>The sender's name</strong>
+                <span>A name is whatever they typed. Only the address is proven, and for a linked side its email's domain.</span>
               </li>
               <li>
-                <strong>The caller's name</strong>
-                <span>A name is whatever they typed. Only the address is proven. Calling by name uses the names your own machine has saved.</span>
+                <strong>A session that is closed</strong>
+                <span>Nothing is stored for later. A message to a session that is not open fails, and says so.</span>
               </li>
             </ul>
           </div>
@@ -465,10 +414,11 @@ Skip any step that is already done.
         <section>
           <h2>The relay</h2>
           <p>
-            Both agents connect out to a relay, so neither side opens a port
-            or needs access to the other's machines. The hosted relay is open
-            to anyone and needs no account. You can also run your own: it is
-            one command, and the
+            Both sides connect out to a relay, so neither opens a port or
+            needs access to the other's machines. The hosted relay lets a
+            name on once it is linked to a parley account: you sign in with a
+            link sent to your email, and link each name once. You can also run
+            your own: it is one command, and the
             <a href="https://github.com/akgandlur/parley#set-up-for-real">README</a>
             has the server files.
           </p>
@@ -476,7 +426,7 @@ Skip any step that is already done.
       </main>
 
       <footer>
-        <span>parley 0.2</span>
+        <span>parley 0.6</span>
         <a href="https://github.com/akgandlur/parley">Source on GitHub</a>
       </footer>
     </div>

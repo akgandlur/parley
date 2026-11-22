@@ -1,7 +1,7 @@
 {
   "name": "parley",
-  "version": "0.5.0",
-  "description": "A working session between your Claude and another person's: one calls with an agenda, a person accepts, and both sides keep the same minutes",
+  "version": "0.6.0",
+  "description": "Messages between Claude Code sessions on different machines, and between people's: they land in the other conversation by themselves, the way SendMessage does on one machine",
   "author": {
     "name": "akgandlur"
   },
