@@ -34,7 +34,7 @@ class Offline extends Error {}
 const explain = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 // A 0.5 node runs in the background and holds the name's relay connection.
-// Two connections for one address replace each other without end, so it goes.
+// Two connections for one id replace each other without end, so it goes.
 async function retireOldNode(home: string, log: (...parts: unknown[]) => void) {
   if (!existsSync(join(home, 'node.json'))) return;
   const info = readJson<{ port: number; token: string; pid: number }>(home, 'node.json');
@@ -87,7 +87,7 @@ export async function startAgent(
   const answered = new Promise<void>((resolve) => (firstAnswer = resolve));
   const keys = new Map<string, string>();
   const keyWaits = new Map<string, Array<{ resolve: (key: string) => void; reject: (e: Error) => void }>>();
-  const acks = new Map<string, { to: string; resolve: (name: string) => void; reject: (e: Error) => void }>();
+  const acks = new Map<string, { to: string; key: string; resolve: (name: string) => void; reject: (e: Error) => void }>();
   const seen = new Set<string>();
 
   const account = startAccount(home, me, log, (att) => {
@@ -243,7 +243,8 @@ export async function startAgent(
       for (const w of waits) w.resolve(p.key);
     } else if (p.kind === 'ack') {
       const wait = acks.get(String(p.id));
-      if (!wait || wait.to !== from) return;
+      // Only the key the message was sealed to can say it arrived.
+      if (!wait || wait.to !== from || wait.key !== p.key) return;
       if (!verifyText(p.key, `parley ack\n${address}\n${p.id}\n${p.name}`, String(p.sig))) return;
       acks.delete(String(p.id));
       saveContact(from, String(p.name), p.key);
@@ -254,7 +255,7 @@ export async function startAgent(
   }
 
   async function receive(from: string, p: any) {
-    if (!isSavedKey(from, p.key)) throw new Error('it is signed by a different key than this address had before');
+    if (!isSavedKey(from, p.key)) throw new Error('it is signed by a different key than this id had before');
     if (!verifyText(p.key, `parley message\n${address}\n${p.eph}\n${p.box}`, String(p.sig))) {
       throw new Error('the signature does not check out');
     }
@@ -317,14 +318,14 @@ export async function startAgent(
     // Resolves with the name the other side answered under, once it has the message.
     async send(to: string, text: string): Promise<string> {
       if (text.length > TEXT_MAX) throw new Error(`a message is at most ${TEXT_MAX} characters`);
-      if (to === address) throw new Error("that is this session's own address");
+      if (to === address) throw new Error("that is this session's own id");
       try {
         const key = keyOf(to) ?? (await askKey(to));
         const id = randomBytes(9).toString('base64url');
         const at = new Date().toISOString();
         const { eph, box } = sealTo(key, JSON.stringify({ id, name: me.name, text, at, att: account.att() }));
         const name = await new Promise<string>((resolve, reject) => {
-          acks.set(id, { to, resolve, reject });
+          acks.set(id, { to, key, resolve, reject });
           setTimeout(() => {
             if (acks.delete(id)) reject(new Error(`${to} did not confirm it got the message`));
           }, ANSWER_MS);

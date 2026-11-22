@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { addressOf, newIdentity } from './crypto';
+import { addressOf, isAddress, newIdentity } from './crypto';
 import { ROOT, locals, sameName, writeJson, type Local } from './home';
 
 export function setUp(name: string, relay: string): Local {
@@ -8,6 +8,9 @@ export function setUp(name: string, relay: string): Local {
     throw new Error(
       `this machine already has the parley name "${taken.name}" (${taken.address})`,
     );
+  }
+  if (isAddress(name)) {
+    throw new Error(`"${name.trim()}" is shaped like a parley id, so nobody could message it by name; pick another name`);
   }
   if (!/^wss?:\/\//.test(relay)) {
     throw new Error(`"${relay}" is not a relay address; it starts with wss://`);

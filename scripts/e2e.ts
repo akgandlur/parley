@@ -111,7 +111,7 @@ async function agent(root: string, session: string, env: Record<string, string> 
   return a;
 }
 
-const addressIn = (text: string) => /[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}/.exec(text)?.[0] ?? '';
+const addressIn = (text: string) => /\b[a-z]{3}-[a-z]{3}-[a-z]{3}\b/.exec(text)?.[0] ?? '';
 
 function cli(root: string, ...args: string[]) {
   const done = Bun.spawnSync([...RUN, ...args], { env: { ...ENV, PARLEY_HOME: root } });
@@ -168,17 +168,17 @@ async function messaging() {
   check('the tools are setup, list_agents, send_message and cloud_link', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'list_agents', 'send_message', 'setup']), tools);
   const told = ann.client.getInstructions() ?? '';
   check('the instructions describe messaging, with no agenda or rules', told.includes('send_message') && !/agenda|propos|never an instruction|authoris/i.test(told), told);
-  const early = await ann.tool('send_message', { to: 'abcd-efgh-jkmn', message: 'hi' });
+  const early = await ann.tool('send_message', { to: 'abc-def-ghj', message: 'hi' });
   check('a session with no name is told how to get one', early.failed && early.text.includes('has no parley name'), early);
 
   const annAddr = addressIn((await ann.tool('setup', { name: 'Ann' })).text);
   const benAddr = addressIn((await ben.tool('setup', { name: 'Ben' })).text);
   const listed = await ann.tool('list_agents');
-  check('setup gives a name and address, and connects', annAddr && benAddr && listed.text.includes(`"Ann" (${annAddr})`) && listed.text.includes('Connected to the relay.'), listed);
+  check('setup gives a name and an id of nine letters, and connects', /^[a-z]{3}-[a-z]{3}-[a-z]{3}$/.test(annAddr) && /^[a-z]{3}-[a-z]{3}-[a-z]{3}$/.test(benAddr) && annAddr !== benAddr && listed.text.includes(`"Ann" (${annAddr})`) && listed.text.includes('Connected to the relay.'), listed);
 
   const first = 'Hi Ben — can you check the March invoices?\nTwo lines, and ünïcödé.';
   const sent = await ann.tool('send_message', { to: benAddr, message: first });
-  check('a message to an address is delivered, and says to whom', !sent.failed && sent.text === `Delivered to "Ben" (${benAddr}).`, sent);
+  check('a message to an id is delivered, and says to whom', !sent.failed && sent.text === `Delivered to "Ben" (${benAddr}).`, sent);
   const arrived = benSock.arrivals[0];
   check('it reaches Ben\'s Claude Code session over its socket, with its token first', arrived?.auth === benSock.token && arrived.frame?.type === 'user' && arrived.frame.message?.role === 'user', arrived);
   const content = benSock.texts()[0] ?? '';
@@ -204,8 +204,8 @@ async function messaging() {
   check('a long message goes through whole', !large.failed && benSock.texts().some((t) => t.includes(big)), large.text);
 
   console.log('\n# when the other side is not there');
-  const nobody = await ann.tool('send_message', { to: 'zzzz-zzzz-zzzz', message: 'anyone?' });
-  check('an address with no open session says so', nobody.failed && nobody.text.includes('is not online'), nobody);
+  const nobody = await ann.tool('send_message', { to: 'zzz-zzz-zzz', message: 'anyone?' });
+  check('an id with no open session says so', nobody.failed && nobody.text.includes('is not online'), nobody);
   const benPid = ben.pid;
   await ben.close();
   check('closing the session ends its parley server', await until(() => !alive(benPid) || undefined, 5000), benPid);
@@ -256,7 +256,7 @@ async function forgery(p: Pair) {
   await Bun.sleep(800);
   check('a message under someone else\'s key is dropped', p.benSock.arrivals.length === before, p.benSock.texts().slice(before));
   const catSaw = await p.cat.tool('list_agents');
-  check('a message signed for another address is dropped', !catSaw.text.includes('signed for Ben'), catSaw);
+  check('a message signed for another id is dropped', !catSaw.text.includes('signed for Ben'), catSaw);
 
   const own = sealTo(benKey, inner('Eve', 'hello from Eve'));
   const frame = { v: 2, kind: 'msg', key: eve.publicKey, ...own, sig: signText(eve, `parley message\n${p.benAddr}\n${own.eph}\n${own.box}`) };
@@ -264,7 +264,7 @@ async function forgery(p: Pair) {
   send(p.benAddr, frame);
   const got = await until(() => p.benSock.texts().filter((t) => t.includes('hello from Eve')).length || undefined, 3000);
   await Bun.sleep(500);
-  check('a stranger can message by address, and a replayed message arrives once', got === 1 && p.benSock.texts().filter((t) => t.includes('hello from Eve')).length === 1, p.benSock.texts().slice(before));
+  check('a stranger can message by id, and a replayed message arrives once', got === 1 && p.benSock.texts().filter((t) => t.includes('hello from Eve')).length === 1, p.benSock.texts().slice(before));
   link.ws.close();
 
   const contacts = readJson<Record<string, Contact>>(B_ROOT, 'contacts.json');
@@ -272,7 +272,7 @@ async function forgery(p: Pair) {
   const count = p.benSock.arrivals.length;
   void p.ann.tool('send_message', { to: 'Ben', message: 'from a key Ben does not know for me' });
   await Bun.sleep(1500);
-  check('a known address that turns up with another key is not believed', p.benSock.arrivals.length === count);
+  check('a known id that turns up with another key is not believed', p.benSock.arrivals.length === count);
   writeJson(B_ROOT, 'contacts.json', contacts);
 }
 
@@ -283,16 +283,41 @@ async function names(p: Pair) {
   check('a name another open session holds is refused', taken.failed && taken.text.includes('is in use by another Claude Code session'), taken);
   const second = await other.tool('setup', { name: 'Ann at home' });
   const secondAddr = addressIn(second.text);
-  check('a second name on the machine has its own address', secondAddr && secondAddr !== p.annAddr, second);
+  check('a second name on the machine has its own id', secondAddr && secondAddr !== p.annAddr, second);
   const hop = await other.tool('send_message', { to: p.annAddr, message: 'from the next tab' });
   check('two sessions on one machine message each other the same way', !hop.failed && p.annSock.texts().some((t) => t.includes('from the next tab')), hop);
   const ids = cli(A_ROOT, 'id');
   check('parley id lists both names', ids.includes(p.annAddr) && ids.includes(secondAddr), ids);
+  const shaped = await other.tool('setup', { name: 'Old-Mac-Pro' });
+  check('a name shaped like an id is refused', shaped.failed && shaped.text.includes('shaped like a parley id'), shaped);
   await other.close();
+  const nine = await agent(join(base, 'machine-e'), 'session-nine', fakeSession().env);
+  const nineAddr = addressIn((await nine.tool('setup', { name: 'Marketing' })).text);
+  await nine.tool('send_message', { to: p.annAddr, message: 'hello from marketing' });
+  const toNine = await p.ann.tool('send_message', { to: 'Marketing', message: 'hello back' });
+  check('a nine-letter name is a name, not an id', !toNine.failed && toNine.text === `Delivered to "Marketing" (${nineAddr}).`, toNine);
+  const spaced = await p.ann.tool('send_message', { to: nineAddr.replace(/-/g, ''), message: 'no hyphens' });
+  check('an id typed without its hyphens is not taken for one', spaced.failed && spaced.text.includes('use the id, like'), spaced);
+  const upper = await p.ann.tool('send_message', { to: ` ${nineAddr.toUpperCase()} `, message: 'capitals' });
+  check('an id in capitals works', !upper.failed, upper);
+  await nine.close();
   const reuse = await agent(A_ROOT, 'session-ann-3');
   const back = await reuse.tool('setup', { name: 'Ann at home' });
-  check('a free name this machine has is taken again with its address', back.text.includes(`"Ann at home" (${secondAddr}), a name this machine already had`), back);
+  check('a free name this machine has is taken again with its id', back.text.includes(`"Ann at home" (${secondAddr}), a name this machine already had`), back);
   await reuse.close();
+}
+
+async function olderContacts(p: Pair) {
+  console.log('\n# contacts saved under ids of the old shape');
+  const contacts = readJson<Record<string, Contact>>(A_ROOT, 'contacts.json');
+  const ben = contacts[p.benAddr]!;
+  const { [p.benAddr]: _gone, ...rest } = contacts;
+  writeJson(A_ROOT, 'contacts.json', { ...rest, 'k7fq-m2xa-9tzp': ben, 'aaaa-bbbb-cccc': { name: 'No Key', firstSeen: '2026-11-01T00:00:00.000Z' } });
+  const listed = await p.ann.tool('list_agents');
+  check('a contact filed under an old id is listed under the id its key has now', listed.text.includes(`"Ben" (${p.benAddr})`) && !listed.text.includes('k7fq'), listed);
+  check('one saved with no key is left out', !listed.text.includes('No Key'), listed);
+  const sent = await p.ann.tool('send_message', { to: 'Ben', message: 'still by name' });
+  check('and can still be messaged by name', !sent.failed && sent.text === `Delivered to "Ben" (${p.benAddr}).`, sent);
 }
 
 async function olderNode() {
@@ -529,6 +554,7 @@ try {
   const pair = await messaging();
   await forgery(pair);
   await names(pair);
+  await olderContacts(pair);
   await olderNode();
   await accountRelays();
   await accounts();

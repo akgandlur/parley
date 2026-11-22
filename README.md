@@ -9,7 +9,7 @@ if that session is idle. parley does the same across machines. A session
 sends with `send_message`, and the other session reads it the way it reads
 a message from one of its own.
 
-Every Claude Code session has its own parley name and its own address, so a
+Every Claude Code session has its own parley name and its own id, so a
 message reaches one session and not whichever Claude happens to be open.
 
 ## Try it on one machine
@@ -33,8 +33,7 @@ e2e` runs it all without a model.
 2. Each person runs
    `claude mcp add parley -e PARLEY_RELAY=wss://... -- parley mcp` and tells
    Claude to set parley up under a name.
-3. Swap addresses. `parley id` prints the names on a machine and their
-   addresses.
+3. Swap ids. `parley id` prints the names on a machine and their ids.
 
 `bun run build` makes a single binary at `dist/parley`, and
 `bun run build:linux` one for a Linux server.
@@ -55,11 +54,11 @@ After changing `src/`, run `bun run build:plugin` and commit
 
 ## The tools
 
-- `setup`: give this session its name. Claude answers with the address to
-  give out.
-- `list_agents`: this session's name and address, whether it is connected,
+- `setup`: give this session its name. Claude answers with the id to give
+  out.
+- `list_agents`: this session's name and id, whether it is connected,
   and the names it can message.
-- `send_message`: send to an address, or to a name once a message has been
+- `send_message`: send to an id, or to a name once a message has been
   exchanged. It returns once the other session has the message, or says it
   is not online.
 - `cloud_link`: tie the name to a parley account, which the hosted relay
@@ -69,7 +68,7 @@ A message that arrives shows in the conversation like this, inside Claude
 Code's own wrapper for a message from another session:
 
 ```
-parley message from "billing" (k7fq-m2xa-9tzp, verified · bren.com):
+parley message from "billing" (kfq-mxa-tzp, verified · bren.com):
 
 Can you check the March invoices?
 
@@ -91,35 +90,42 @@ session that is not open fails, and says so.
 
 ## Names
 
-A name is what others see, and each name has its own key and its own
-address. A machine can hold as many as it has Claude Code sessions.
+A name is what others see, and each name has its own key and its own id.
+A machine can hold as many as it has Claude Code sessions.
 
 - **A session says who it is.** "Set parley up as billing" makes the name
-  `billing` with a new address. A later session that says the same thing
-  becomes `billing` again, with the same address.
+  `billing` with a new id. A later session that says the same thing becomes
+  `billing` again, with the same id.
 - **One open session holds a name at a time.** A second session that asks
   for it is refused and picks another. Closing the session frees the name.
 - **A session with no name is told so**, with the names the machine has and
   which are free.
-- **Message by name after the first message.** The first one needs the
-  address. After that both sides have the other saved. Names on the same
+- **An id is nine letters**, like `kfq-mxa-tzp`, typed with its hyphens. A
+  name cannot be shaped like one.
+- **Message by name after the first message.** The first one needs the id.
+  After that both sides have the other saved. Names on the same
   machine can message each other by name from the start.
 
 ## What is protected
 
 - **The relay cannot read a message.** Each one is sealed to the key of the
-  address it is for, with a fresh key pair every time, and signed by the
+  id it is for, with a fresh key pair every time, and signed by the
   sender. The relay learns who is online and who messages whom.
-- **An address is a hash of a key.** A relay that swaps keys is caught.
-- **A contact is its key.** The key an address first used is saved, and the
-  same address with any other key is not believed.
-- **A message is signed for the address it was sent to,** so a relay cannot
+- **An id is a hash of a key.** A relay that swaps keys is caught.
+- **A contact is its key.** The key an id first used is saved, and the same
+  id with any other key is not believed.
+- **A message is signed for the id it was sent to,** so a relay cannot
   pass it to someone else, and a replayed message arrives once.
 
 ## What is not
 
-- A name is whatever the sender typed. Only the address is proven, and for a
+- A name is whatever the sender typed. Only the id is proven, and for a
   verified side the domain of its owner's email.
+- An id is short: nine letters, about 42 bits of its key. A second key with
+  the same id could be found with days of computing. On the hosted relay an
+  id belongs to one account, so that second key cannot connect; a relay you
+  run open does not check. Once two sides have exchanged a message, each
+  holds the other's key and a second key is not believed.
 - An agent with a shell on the same machine runs as the same user, so it can
   reach anything that user can, the key in `identity.json` included.
 
@@ -146,9 +152,9 @@ A relay you run yourself is open unless you start it with
 
 ## Files
 
-`~/.parley` (or `PARLEY_HOME`) holds `contacts.json`, the addresses this
+`~/.parley` (or `PARLEY_HOME`) holds `contacts.json`, the ids this
 machine has exchanged messages with and their keys, and `claims.json`, which
-open session holds which name. Each name has a folder, `ids/<address>/`:
+open session holds which name. Each name has a folder, `ids/<id>/`:
 `identity.json` is its key, `config.json` its relay, `cloud.json` the cloud
 it is linked to if any, `attest.json` the proof that cloud gave it, and
 `messages.jsonl` every message it sent and received.

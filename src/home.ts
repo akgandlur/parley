@@ -66,9 +66,16 @@ export function locals(): Local[] {
 export const sameName = (a: string, b: string) =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
+// Ids had another shape before 0.7. A contact filed under one is refiled
+// under the id its key has now; one saved without a key cannot be reached.
 export function loadContacts(): Record<string, Contact> {
   if (!existsSync(join(ROOT, 'contacts.json'))) return {};
-  return readJson<Record<string, Contact>>(ROOT, 'contacts.json');
+  const saved = readJson<Record<string, Contact>>(ROOT, 'contacts.json');
+  return Object.fromEntries(
+    Object.entries(saved).flatMap(([id, c]) =>
+      isAddress(id) ? [[id, c]] : c.key ? [[addressOf(c.key), c]] : [],
+    ),
+  );
 }
 
 export function saveContact(address: string, name: string, key: string) {
@@ -83,9 +90,9 @@ export function saveContact(address: string, name: string, key: string) {
   writeJson(ROOT, 'contacts.json', contacts);
 }
 
-// An address is 60 bits of its key, few enough that a second key with the
-// same address could be searched for. So a contact is the key first heard
-// from, and the address alone never stands in for it again.
+// An id is 42 bits of its key, few enough that a second key with the same
+// id can be searched for. So a contact is the key first heard from, and the
+// id alone never stands in for it again.
 export function isSavedKey(address: string, key: string): boolean {
   const saved = loadContacts()[address]?.key;
   return saved === undefined || saved === key;
@@ -99,8 +106,8 @@ export function callable(self: string): { name: string; address: string }[] {
   return [...here, ...known].filter((k) => k.address !== self);
 }
 
-// Anything shaped like an address is one, whatever a contact has named
-// itself: a name must never be able to stand in for someone else's address.
+// Anything shaped like an id is one, whatever a contact has named itself:
+// a name must never be able to stand in for someone else's id.
 export function addressFor(to: string, self: string): string {
   if (isAddress(to)) return normalizeAddress(to);
   const names = callable(self);
@@ -110,10 +117,10 @@ export function addressFor(to: string, self: string): string {
   const list = (from: typeof names) =>
     from.map((n) => `"${n.name}" (${n.address})`).join(', ');
   if (hits.length) {
-    throw new Error(`more than one address is named "${to}": ${list(hits)}. Use the address.`);
+    throw new Error(`more than one id is named "${to}": ${list(hits)}. Use the id.`);
   }
   throw new Error(
-    `no name you can message is "${to}". ${names.length ? `The names are ${list(names)}.` : 'No names are saved yet.'} A name is saved once you have exchanged a message; before that, use the 12-character address, like k7fq-m2xa-9tzp.`,
+    `no name you can message is "${to}". ${names.length ? `The names are ${list(names)}.` : 'No names are saved yet.'} A name is saved once you have exchanged a message; before that, use the id, like kfq-mxa-tzp.`,
   );
 }
 

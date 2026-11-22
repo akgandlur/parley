@@ -21,7 +21,7 @@ import { NAME_MAX, TEXT_MAX, VERSION } from './types';
 
 const INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's, the way SendMessage reaches sessions on this one.
 
-Every session has its own parley name and an address, like k7fq-m2xa-9tzp. Give your user the address when they want someone to reach this session. send_message sends to an address, or to a name that list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
+Every session has its own parley name and an id, like kfq-mxa-tzp. Give your user the id when they want someone to reach this session. send_message sends to an id, or to a name that list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
 The hosted relay lets a name on once it is linked to a parley account, once per name. When list_agents shows a link, give it to your user to open while signed in.`;
 
@@ -41,7 +41,7 @@ function unnamed(): string {
   return [
     'This Claude Code session has no parley name yet. Names on this machine:',
     ...lines,
-    'Use the setup tool with a free name to be it in this session, or with a new name for a separate address. If your user named one, use that. If there is exactly one name and it is free, take it. Otherwise ask your user which name this session should have.',
+    'Use the setup tool with a free name to be it in this session, or with a new name for a separate id. If your user named one, use that. If there is exactly one name and it is free, take it. Otherwise ask your user which name this session should have.',
   ].join('\n');
 }
 
@@ -110,7 +110,7 @@ export async function runMcp() {
     'setup',
     {
       description:
-        "Give this Claude Code session its parley name. A new name creates an identity with its own address. A free name this machine already has makes this session that name again, with the same address as before. Ask your user for the name unless they gave one; it is what others see on your messages. Give your user the address it returns: others need it to reach this session.",
+        "Give this Claude Code session its parley name. A new name creates an identity with its own id. A free name this machine already has makes this session that name again, with the same id as before. Ask your user for the name unless they gave one; it is what others see on your messages. Give your user the id it returns: others need it to reach this session.",
       inputSchema: { name: z.string().trim().min(1).max(NAME_MAX).describe('The name others will see') },
     },
     ({ name }) =>
@@ -134,7 +134,7 @@ export async function runMcp() {
         if (!relay) throw new Error('no relay is configured: PARLEY_RELAY is not set for this server');
         const made = setUp(name, relay);
         await become(made);
-        return `This session is now "${made.name}", a new name. Its address is ${made.address}. Give this address to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
+        return `This session is now "${made.name}", a new name. Its id is ${made.address}. Give this id to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
       }),
   );
 
@@ -142,7 +142,7 @@ export async function runMcp() {
     'list_agents',
     {
       description:
-        "Show this session's parley name and address, whether it is connected, and the names you can message: other parley names on this machine and everyone you have exchanged a message with. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then.",
+        "Show this session's parley name and id, whether it is connected, and the names you can message: other parley names on this machine and everyone you have exchanged a message with. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then.",
     },
     () =>
       named(async (a) => {
@@ -166,7 +166,7 @@ export async function runMcp() {
           const where = local ? (holder(n.address) ? 'this machine, open' : 'this machine, not open') : `first heard ${contacts[n.address]?.firstSeen.slice(0, 10)}`;
           return `  "${n.name}" (${n.address}): ${where}`;
         });
-        lines.push('', names.length ? 'Names you can message:' : 'No other names yet. Message an address to start.', ...names);
+        lines.push('', names.length ? 'Names you can message:' : 'No other names yet. Message an id to start.', ...names);
         return lines.join('\n');
       }),
   );
@@ -177,7 +177,7 @@ export async function runMcp() {
       description:
         'Send a message to another Claude Code session through parley. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from.',
       inputSchema: {
-        to: z.string().max(100).describe('A parley address like k7fq-m2xa-9tzp, or a name list_agents shows'),
+        to: z.string().max(100).describe('A parley id like kfq-mxa-tzp, or a name list_agents shows'),
         message: z.string().min(1).max(TEXT_MAX),
       },
     },

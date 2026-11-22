@@ -14,7 +14,7 @@ import {
 
 export type Identity = { name: string; publicKey: string; privateKey: string };
 
-const ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz';
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 const TAG_BYTES = 16;
 
 function jwkField(key: KeyObject, field: 'x' | 'd'): string {
@@ -32,37 +32,32 @@ export function newIdentity(name: string): Identity {
   };
 }
 
-// The address is a hash of the key, so a relay cannot hand out someone
-// else's key for an address without the mismatch showing.
+// The id is a hash of the key, so a relay cannot hand out someone else's
+// key for an id without the mismatch showing.
 export function addressOf(publicKey: string): string {
   const digest = createHash('sha256')
     .update(Buffer.from(publicKey, 'base64url'))
     .digest();
-  let bits = digest.readBigUInt64BE(0) >> 4n;
+  let n = digest.readBigUInt64BE(0);
   let out = '';
-  for (let i = 0; i < 12; i++) {
-    out = ALPHABET[Number(bits & 31n)] + out;
-    bits >>= 5n;
+  for (let i = 0; i < 9; i++) {
+    out = LETTERS[Number(n % 26n)] + out;
+    n /= 26n;
   }
-  return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8)}`;
+  return `${out.slice(0, 3)}-${out.slice(3, 6)}-${out.slice(6)}`;
 }
 
-export function normalizeAddress(input: string): string {
-  const bare = input.toLowerCase().replace(/[^0-9a-z]/g, '');
-  if (bare.length !== 12 || [...bare].some((c) => !ALPHABET.includes(c))) {
-    throw new Error(
-      `"${input}" is not a parley address (12 characters, like k7fq-m2xa-9tzp)`,
-    );
-  }
-  return `${bare.slice(0, 4)}-${bare.slice(4, 8)}-${bare.slice(8)}`;
-}
-
-const ADDRESS = new RegExp(
-  `^[${ALPHABET}]{4}[- ]?[${ALPHABET}]{4}[- ]?[${ALPHABET}]{4}$`,
-  'i',
-);
+// The hyphens are required: without them any nine-letter name would read as an id.
+const ADDRESS = /^[a-z]{3}-[a-z]{3}-[a-z]{3}$/i;
 
 export const isAddress = (input: string) => ADDRESS.test(input.trim());
+
+export function normalizeAddress(input: string): string {
+  if (!isAddress(input)) {
+    throw new Error(`"${input}" is not a parley id (nine letters, like kfq-mxa-tzp)`);
+  }
+  return input.trim().toLowerCase();
+}
 
 export function signText(id: Identity, text: string): string {
   const key = createPrivateKey({

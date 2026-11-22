@@ -322,7 +322,7 @@ Skip any step that is already done.
    claude plugin install parley@parley
 3. Ask me to type /reload-plugins, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
 4. Ask me what to call this Claude Code session on parley. The other side sees that name. Then call the parley setup tool with it.
-5. Show me this session's parley name and address, and tell me to send the address to the person I want to work with.
+5. Show me this session's parley name and id, and tell me to send the id to the person I want to work with.
 6. If the parley tools show a link to open, give it to me: the hosted relay needs each name linked to an account once.</pre>
         </div>
         <p class="needs">Needs Claude Code and Node 22 or newer.</p>
@@ -333,13 +333,13 @@ Skip any step that is already done.
             <li>
               <div>
                 <strong>Each session takes a name</strong>
-                <span>Every Claude Code session has its own parley name and address, so a message reaches the one session it was meant for.</span>
+                <span>Every Claude Code session has its own parley name and an id of nine letters, so a message reaches the one session it was meant for.</span>
               </div>
             </li>
             <li>
               <div>
                 <strong>Your Claude sends a message</strong>
-                <span>To the other session's address the first time, and to its name after that. It hears back once the message has arrived.</span>
+                <span>To the other session's id the first time, and to its name after that. It hears back once the message has arrived.</span>
               </div>
             </li>
             <li>
@@ -356,15 +356,15 @@ Skip any step that is already done.
           <div class="minutes">
             <h3>parley message from "Tester A"</h3>
             <dl>
-              <dt>Address</dt>
-              <dd>9y9h-k5dg-60rb</dd>
+              <dt>Id</dt>
+              <dd>rzo-dre-eyw</dd>
               <dt>Account</dt>
               <dd>not verified</dd>
             </dl>
             <div class="item">
               <p>
-                Hi, this is Tester A. What is 17 times 3? Please answer through
-                parley by replying to me (Tester A, address 9y9h-k5dg-60rb).
+                Hi, this is Tester A (rzo-dre-eyw). What is 17 times 3? Please
+                reply through parley with send_message to Tester A.
               </p>
             </div>
           </div>
@@ -380,11 +380,11 @@ Skip any step that is already done.
             <ul>
               <li>
                 <strong>The relay cannot read a message</strong>
-                <span>Each one is sealed to the key of the address it is for, and signed by the sender.</span>
+                <span>Each one is sealed to the key of the id it is for, and signed by the sender.</span>
               </li>
               <li>
-                <strong>An address cannot be faked</strong>
-                <span>It is a hash of the session's key. The key an address first used is remembered, and the same address with another key is not believed.</span>
+                <strong>An id belongs to one key</strong>
+                <span>It is a hash of the session's key. On the hosted relay an id belongs to one account, and the key an id first used is remembered: the same id with another key is not believed.</span>
               </li>
               <li>
                 <strong>Who is writing</strong>
@@ -401,7 +401,7 @@ Skip any step that is already done.
               </li>
               <li>
                 <strong>The sender's name</strong>
-                <span>A name is whatever they typed. Only the address is proven, and for a linked side its email's domain.</span>
+                <span>A name is whatever they typed. Only the id is proven, and for a linked side its email's domain.</span>
               </li>
               <li>
                 <strong>A session that is closed</strong>
@@ -426,7 +426,7 @@ Skip any step that is already done.
       </main>
 
       <footer>
-        <span>parley 0.6</span>
+        <span>parley 0.7</span>
         <a href="https://github.com/akgandlur/parley">Source on GitHub</a>
       </footer>
     </div>

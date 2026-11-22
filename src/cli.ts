@@ -10,7 +10,7 @@ import { setUp } from './setup';
 const USAGE = `parley: messages between Claude Code sessions on different machines
 
   parley init --name <name> --relay <ws url>
-  parley id                 show the names on this machine and their addresses
+  parley id                 show the names on this machine and their ids
   parley cloud link [--url <https url>]   print a link that ties this name to your parley account
 
   A machine can hold several names, one for each Claude Code session.

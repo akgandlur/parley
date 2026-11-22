@@ -6992,7 +6992,7 @@ import {
   sign,
   verify
 } from "node:crypto";
-var ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
+var LETTERS = "abcdefghijklmnopqrstuvwxyz";
 var TAG_BYTES = 16;
 function jwkField(key, field) {
   const value = key.export({ format: "jwk" })[field];
@@ -7010,23 +7010,22 @@ function newIdentity(name) {
 }
 function addressOf(publicKey) {
   const digest = createHash("sha256").update(Buffer.from(publicKey, "base64url")).digest();
-  let bits = digest.readBigUInt64BE(0) >> 4n;
+  let n = digest.readBigUInt64BE(0);
   let out = "";
-  for (let i = 0;i < 12; i++) {
-    out = ALPHABET[Number(bits & 31n)] + out;
-    bits >>= 5n;
+  for (let i = 0;i < 9; i++) {
+    out = LETTERS[Number(n % 26n)] + out;
+    n /= 26n;
   }
-  return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8)}`;
+  return `${out.slice(0, 3)}-${out.slice(3, 6)}-${out.slice(6)}`;
 }
-function normalizeAddress(input) {
-  const bare = input.toLowerCase().replace(/[^0-9a-z]/g, "");
-  if (bare.length !== 12 || [...bare].some((c) => !ALPHABET.includes(c))) {
-    throw new Error(`"${input}" is not a parley address (12 characters, like k7fq-m2xa-9tzp)`);
-  }
-  return `${bare.slice(0, 4)}-${bare.slice(4, 8)}-${bare.slice(8)}`;
-}
-var ADDRESS = new RegExp(`^[${ALPHABET}]{4}[- ]?[${ALPHABET}]{4}[- ]?[${ALPHABET}]{4}$`, "i");
+var ADDRESS = /^[a-z]{3}-[a-z]{3}-[a-z]{3}$/i;
 var isAddress = (input) => ADDRESS.test(input.trim());
+function normalizeAddress(input) {
+  if (!isAddress(input)) {
+    throw new Error(`"${input}" is not a parley id (nine letters, like kfq-mxa-tzp)`);
+  }
+  return input.trim().toLowerCase();
+}
 function signText(id, text) {
   const key = createPrivateKey({
     key: { kty: "OKP", crv: "Ed25519", x: id.publicKey, d: id.privateKey },
@@ -7166,7 +7165,8 @@ var sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 function loadContacts() {
   if (!existsSync(join(ROOT, "contacts.json")))
     return {};
-  return readJson(ROOT, "contacts.json");
+  const saved = readJson(ROOT, "contacts.json");
+  return Object.fromEntries(Object.entries(saved).flatMap(([id, c]) => isAddress(id) ? [[id, c]] : c.key ? [[addressOf(c.key), c]] : []));
 }
 function saveContact(address, name, key) {
   const contacts = loadContacts();
@@ -7199,9 +7199,9 @@ function addressFor(to, self) {
     return only.address;
   const list = (from) => from.map((n) => `"${n.name}" (${n.address})`).join(", ");
   if (hits.length) {
-    throw new Error(`more than one address is named "${to}": ${list(hits)}. Use the address.`);
+    throw new Error(`more than one id is named "${to}": ${list(hits)}. Use the id.`);
   }
-  throw new Error(`no name you can message is "${to}". ${names.length ? `The names are ${list(names)}.` : "No names are saved yet."} A name is saved once you have exchanged a message; before that, use the 12-character address, like k7fq-m2xa-9tzp.`);
+  throw new Error(`no name you can message is "${to}". ${names.length ? `The names are ${list(names)}.` : "No names are saved yet."} A name is saved once you have exchanged a message; before that, use the id, like kfq-mxa-tzp.`);
 }
 var SESSION = process.env.CLAUDE_CODE_SESSION_ID;
 var isMine = (c) => SESSION ? c.session === SESSION : c.pid === process.pid;
@@ -22125,7 +22125,7 @@ var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.6.0";
+var VERSION = "0.7.0";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -22342,7 +22342,7 @@ async function startAgent(home, log, onMessage) {
         w.resolve(p.key);
     } else if (p.kind === "ack") {
       const wait = acks.get(String(p.id));
-      if (!wait || wait.to !== from)
+      if (!wait || wait.to !== from || wait.key !== p.key)
         return;
       if (!verifyText(p.key, `parley ack
 ${address}
@@ -22358,7 +22358,7 @@ ${p.name}`, String(p.sig)))
   }
   async function receive(from, p) {
     if (!isSavedKey(from, p.key))
-      throw new Error("it is signed by a different key than this address had before");
+      throw new Error("it is signed by a different key than this id had before");
     if (!verifyText(p.key, `parley message
 ${address}
 ${p.eph}
@@ -22427,14 +22427,14 @@ ${me.name}`)
       if (text.length > TEXT_MAX)
         throw new Error(`a message is at most ${TEXT_MAX} characters`);
       if (to === address)
-        throw new Error("that is this session's own address");
+        throw new Error("that is this session's own id");
       try {
         const key = keyOf(to) ?? await askKey(to);
         const id = randomBytes(9).toString("base64url");
         const at = new Date().toISOString();
         const { eph, box } = sealTo(key, JSON.stringify({ id, name: me.name, text, at, att: account.att() }));
         const name = await new Promise((resolve, reject) => {
-          acks.set(id, { to, resolve, reject });
+          acks.set(id, { to, key, resolve, reject });
           setTimeout(() => {
             if (acks.delete(id))
               reject(new Error(`${to} did not confirm it got the message`));
@@ -22500,6 +22500,9 @@ function setUp(name, relay) {
   if (taken) {
     throw new Error(`this machine already has the parley name "${taken.name}" (${taken.address})`);
   }
+  if (isAddress(name)) {
+    throw new Error(`"${name.trim()}" is shaped like a parley id, so nobody could message it by name; pick another name`);
+  }
   if (!/^wss?:\/\//.test(relay)) {
     throw new Error(`"${relay}" is not a relay address; it starts with wss://`);
   }
@@ -22514,7 +22517,7 @@ function setUp(name, relay) {
 // src/mcp.ts
 var INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's, the way SendMessage reaches sessions on this one.
 
-Every session has its own parley name and an address, like k7fq-m2xa-9tzp. Give your user the address when they want someone to reach this session. send_message sends to an address, or to a name that list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
+Every session has its own parley name and an id, like kfq-mxa-tzp. Give your user the id when they want someone to reach this session. send_message sends to an id, or to a name that list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
 The hosted relay lets a name on once it is linked to a parley account, once per name. When list_agents shows a link, give it to your user to open while signed in.`;
 var log = (...parts) => console.error(new Date().toISOString(), "parley:", ...parts);
@@ -22531,7 +22534,7 @@ function unnamed() {
   return [
     "This Claude Code session has no parley name yet. Names on this machine:",
     ...lines,
-    "Use the setup tool with a free name to be it in this session, or with a new name for a separate address. If your user named one, use that. If there is exactly one name and it is free, take it. Otherwise ask your user which name this session should have."
+    "Use the setup tool with a free name to be it in this session, or with a new name for a separate id. If your user named one, use that. If there is exactly one name and it is free, take it. Otherwise ask your user which name this session should have."
   ].join(`
 `);
 }
@@ -22590,7 +22593,7 @@ async function runMcp() {
     return fn(agent);
   });
   server.registerTool("setup", {
-    description: "Give this Claude Code session its parley name. A new name creates an identity with its own address. A free name this machine already has makes this session that name again, with the same address as before. Ask your user for the name unless they gave one; it is what others see on your messages. Give your user the address it returns: others need it to reach this session.",
+    description: "Give this Claude Code session its parley name. A new name creates an identity with its own id. A free name this machine already has makes this session that name again, with the same id as before. Ask your user for the name unless they gave one; it is what others see on your messages. Give your user the id it returns: others need it to reach this session.",
     inputSchema: { name: string2().trim().min(1).max(NAME_MAX).describe("The name others will see") }
   }, ({ name }) => reply(async () => {
     const existing = locals().find((l) => sameName(l.name, name));
@@ -22611,10 +22614,10 @@ async function runMcp() {
       throw new Error("no relay is configured: PARLEY_RELAY is not set for this server");
     const made = setUp(name, relay);
     await become(made);
-    return `This session is now "${made.name}", a new name. Its address is ${made.address}. Give this address to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
+    return `This session is now "${made.name}", a new name. Its id is ${made.address}. Give this id to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
   }));
   server.registerTool("list_agents", {
-    description: "Show this session's parley name and address, whether it is connected, and the names you can message: other parley names on this machine and everyone you have exchanged a message with. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then."
+    description: "Show this session's parley name and id, whether it is connected, and the names you can message: other parley names on this machine and everyone you have exchanged a message with. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then."
   }, () => named(async (a) => {
     if (a.account.state().link || a.account.state().error)
       await a.account.recheck();
@@ -22634,14 +22637,14 @@ async function runMcp() {
       const where = local ? holder(n.address) ? "this machine, open" : "this machine, not open" : `first heard ${contacts[n.address]?.firstSeen.slice(0, 10)}`;
       return `  "${n.name}" (${n.address}): ${where}`;
     });
-    lines.push("", names.length ? "Names you can message:" : "No other names yet. Message an address to start.", ...names);
+    lines.push("", names.length ? "Names you can message:" : "No other names yet. Message an id to start.", ...names);
     return lines.join(`
 `);
   }));
   server.registerTool("send_message", {
     description: "Send a message to another Claude Code session through parley. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from.",
     inputSchema: {
-      to: string2().max(100).describe("A parley address like k7fq-m2xa-9tzp, or a name list_agents shows"),
+      to: string2().max(100).describe("A parley id like kfq-mxa-tzp, or a name list_agents shows"),
       message: string2().min(1).max(TEXT_MAX)
     }
   }, ({ to, message }) => named(async (a) => {
@@ -22851,6 +22854,9 @@ function setUp2(name, relay) {
   if (taken) {
     throw new Error(`this machine already has the parley name "${taken.name}" (${taken.address})`);
   }
+  if (isAddress(name)) {
+    throw new Error(`"${name.trim()}" is shaped like a parley id, so nobody could message it by name; pick another name`);
+  }
   if (!/^wss?:\/\//.test(relay)) {
     throw new Error(`"${relay}" is not a relay address; it starts with wss://`);
   }
@@ -22866,7 +22872,7 @@ function setUp2(name, relay) {
 var USAGE = `parley: messages between Claude Code sessions on different machines
 
   parley init --name <name> --relay <ws url>
-  parley id                 show the names on this machine and their addresses
+  parley id                 show the names on this machine and their ids
   parley cloud link [--url <https url>]   print a link that ties this name to your parley account
 
   A machine can hold several names, one for each Claude Code session.
