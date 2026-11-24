@@ -1,4 +1,4 @@
-export const VERSION = '0.7.2';
+export const VERSION = '0.8.0';
 
 export const NAME_MAX = 60;
 

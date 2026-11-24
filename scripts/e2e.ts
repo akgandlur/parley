@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { createServer, type Server } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ServerWebSocket } from 'bun';
@@ -36,8 +36,11 @@ const {
   CLAUDE_CODE_SESSION_ID: _id,
   CLAUDE_CODE_MESSAGING_SOCKET: _sock,
   CLAUDE_CODE_MESSAGING_TOKEN: _token,
-  ...ENV
+  ...REAL
 } = process.env;
+// Nor may they see the real sessions open on this machine.
+const CLAUDE_DIR = join(base, 'claude');
+const ENV = { ...REAL, CLAUDE_CONFIG_DIR: CLAUDE_DIR };
 
 async function until<T>(get: () => T | undefined, ms = 8000): Promise<T | undefined> {
   for (const deadline = Date.now() + ms; Date.now() < deadline; await Bun.sleep(50)) {
@@ -416,7 +419,7 @@ async function accounts() {
   stub.accounts.set(ola.publicKey, { sub: 'acct-ola', domain: 'ola.example' });
   const olaSession = await agent(olaRoot, 'session-ola', env);
   const unnamedYet = await olaSession.tool('list_agents');
-  check('the session is told its name is free to take again', unnamedYet.failed && unnamedYet.text.includes(`"Ola" (${olaAddr}): free`), unnamedYet);
+  check('the session is told its name is free to take again', !unnamedYet.failed && unnamedYet.text.includes(`"Ola" (${olaAddr}): free`), unnamedYet);
   const taken = await olaSession.tool('setup', { name: 'Ola' });
   check('it takes the name, with the id its key has now', !taken.failed && taken.text.includes(`"Ola" (${olaAddr})`), taken);
   const olaOn = await eventually(async () => {
@@ -574,6 +577,51 @@ async function accountRelays() {
   }
 }
 
+// Claude Code's own registry of the sessions open on this machine, as its
+// SendMessage reads it.
+function register(name: string, socket: string, pid?: number) {
+  const proc = pid === undefined ? Bun.spawn(['sleep', '600']) : undefined;
+  if (proc) cleanup.push(() => proc.kill());
+  const id = pid ?? proc!.pid;
+  const dir = join(CLAUDE_DIR, 'sessions');
+  const peerToken = randomBytes(16).toString('hex');
+  writeJson(dir, `${id}.json`, { pid: id, name, messagingSocketPath: socket, status: 'idle' });
+  writeJson(dir, `${id}.${createHash('sha256').update(socket).digest('hex')}.key`, { peerToken }, true);
+  return { peerToken, forget: () => rmSync(join(dir, `${id}.json`)) };
+}
+
+async function sessionsHere() {
+  console.log('\n-- sessions on this machine, by their Claude Code names');
+  const frontSock = fakeSession();
+  const backSock = fakeSession();
+  const front = register('front-desk', frontSock.env.CLAUDE_CODE_MESSAGING_SOCKET);
+  const back = register('Back-Office', backSock.env.CLAUDE_CODE_MESSAGING_SOCKET);
+  register('ghost', join(base, 'gone.sock'), 2 ** 22 + 12345);
+  const fd = await agent(mkdtempSync(join(base, 'fd-')), 'session-front', frontSock.env);
+  const bo = await agent(mkdtempSync(join(base, 'bo-')), 'session-back', backSock.env);
+
+  const listed = await fd.tool('list_agents');
+  check('a session with no parley name lists the open sessions here, not itself or a closed one', !listed.failed && listed.text.includes('"Back-Office": idle') && !listed.text.includes('"front-desk"') && !listed.text.includes('ghost'), listed);
+  const sent = await fd.tool('send_message', { to: 'back-office', message: 'Can you rerun the March report?' });
+  check('a message to a session name goes over its socket, with no parley name', !sent.failed && sent.text === 'Delivered to "Back-Office", a Claude Code session on this machine.', sent);
+  const got = backSock.arrivals[0];
+  check('it carries the token that session gave out, and says who sent it', got?.auth === back.peerToken && String(got?.frame?.message?.content).startsWith('parley message from "front-desk" (a Claude Code session on this machine):\n\nCan you rerun the March report?'), got);
+  const answer = await bo.tool('send_message', { to: 'front-desk', message: 'Done.' });
+  check('the reply goes back by the name on the message', !answer.failed && frontSock.arrivals[0]?.auth === front.peerToken && frontSock.texts()[0]?.includes('\n\nDone.\n\n'), [answer, frontSock.arrivals]);
+  const toGhost = await fd.tool('send_message', { to: 'ghost', message: 'hello?' });
+  check('a closed session is not messaged', toGhost.failed && toGhost.text.includes('no Claude Code session on this machine is named "ghost"') && !existsSync(join(base, 'gone.sock')), toGhost);
+
+  const twin = register('back-office', join(base, 'twin.sock'));
+  const twice = await fd.tool('send_message', { to: 'Back-Office', message: 'which one?' });
+  check('two sessions with one name are not guessed between', twice.failed && twice.text.includes('2 Claude Code sessions on this machine are named'), twice);
+  twin.forget();
+
+  const named = await fd.tool('setup', {});
+  check('setup with no name takes the Claude Code session name', !named.failed && named.text.includes('This session is now "front-desk"') && addressIn(named.text), named);
+  const stillHere = await fd.tool('send_message', { to: 'Back-Office', message: 'and once more' });
+  check('with a parley name, a session here is still reached directly', !stillHere.failed && backSock.arrivals.length === 2, stillHere);
+}
+
 try {
   console.log(`parley ${VERSION} on ${RUN[0]}`);
   sealing();
@@ -584,6 +632,7 @@ try {
   await olderNode();
   await accountRelays();
   await accounts();
+  await sessionsHere();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.stack : err);

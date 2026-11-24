@@ -9,7 +9,10 @@ if that session is idle. parley does the same across machines. A session
 sends with `send_message`, and the other session reads it the way it reads
 a message from one of its own.
 
-Every Claude Code session has its own parley name and its own id, so a
+One `send_message` reaches any session by name. A session on the same
+machine is reached by its Claude Code session name, over the socket Claude
+Code's own SendMessage uses, with no setup. A session elsewhere has a
+parley name, by default its Claude Code session name, and its own id, so a
 message reaches one session and not whichever Claude happens to be open.
 
 ## Try it on one machine
@@ -54,13 +57,14 @@ After changing `src/`, run `bun run build:plugin` and commit
 
 ## The tools
 
-- `setup`: give this session its name. Claude answers with the id to give
-  out.
-- `list_agents`: this session's name and id, whether it is connected,
-  and the names it can message.
-- `send_message`: send to an id, or to a name once a message has been
-  exchanged. It returns once the other session has the message, or says it
-  is not online.
+- `setup`: give this session its parley name, by default its Claude Code
+  session name. Claude answers with the id to give out.
+- `list_agents`: the Claude Code sessions open on this machine, this
+  session's parley name and id, whether it is connected, and the names it
+  can message.
+- `send_message`: send to a Claude Code session name on this machine, an
+  id, or a name once a message has been exchanged. It returns once the
+  other session has the message, or says it is not online.
 - `cloud_link`: tie the name to a parley account, which the hosted relay
   needs.
 
@@ -87,6 +91,15 @@ parley tool call instead.
 
 Like Claude Code's own messages, nothing is stored for later. A message to a
 session that is not open fails, and says so.
+
+## Sessions on this machine
+
+Claude Code lists its open sessions in `~/.claude/sessions`, each with its
+name, its socket and the token another session shows on it. `send_message`
+to one of those names writes there directly, the way SendMessage does; the
+relay is not involved and no parley name is needed. A name used by two open
+sessions is refused rather than guessed; `/rename` one of them. This
+listing is not a documented API either.
 
 ## Names
 

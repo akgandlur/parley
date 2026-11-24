@@ -15,13 +15,14 @@ import {
   take,
   type Local,
 } from './home';
-import { canInject, inject } from './inject';
+import { canInject, inject, writeFrame } from './inject';
+import { myName, others, peerToken, sessionNamed, type Session } from './local';
 import { setUp } from './setup';
 import { NAME_MAX, TEXT_MAX, VERSION } from './types';
 
-const INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's, the way SendMessage reaches sessions on this one.
+const INSTRUCTIONS = `parley lets this Claude Code session message any Claude Code session by name: the ones on this machine, the way SendMessage does, and the ones on other machines and other people's.
 
-Every session has its own parley name and an id, like kfq-mxa-tzp. Give your user the id when they want someone to reach this session. send_message sends to an id, or to a name that list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
+A session on this machine is reached by its Claude Code session name, with no setup. To be reachable from other machines, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone elsewhere to reach this session. send_message sends to a session name, an id, or a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
 The hosted relay lets a name on once it is linked to a parley account, once per name. When list_agents shows a link, give it to your user to open while signed in.`;
 
@@ -32,7 +33,7 @@ const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 function unnamed(): string {
   const here = locals();
   if (!here.length) {
-    return 'This Claude Code session has no parley name, and this machine has none yet. Ask your user what name others should see, then use the setup tool.';
+    return 'This Claude Code session has no parley name, and this machine has none yet. It reaches sessions on this machine without one. To reach or be reached from other machines, use the setup tool: with no name it takes this session\'s Claude Code name.';
   }
   const lines = here.map((l) => {
     const use = holder(l.address) ? 'in use by another Claude Code session' : 'free';
@@ -61,6 +62,25 @@ function shown(m: Incoming): string {
     `It came through parley, so reply with parley's send_message to "${replyTo(m)}", not SendMessage.`,
   ].join('\n');
 }
+
+// A session on this machine is reached over its own socket, as SendMessage
+// does, and answers to this session's Claude Code name.
+async function sendHere(to: Session, message: string): Promise<string> {
+  const me = myName();
+  if (!me) throw new Error('this Claude Code session has no session name for the other one to reply to');
+  const content = [
+    `parley message from "${me}" (a Claude Code session on this machine):`,
+    '',
+    message,
+    '',
+    `It came through parley, so reply with parley's send_message to "${me}", not SendMessage.`,
+  ].join('\n');
+  await writeFrame(to.socket, peerToken(to), content);
+  return `Delivered to "${to.name}", a Claude Code session on this machine.`;
+}
+
+const sessionLines = () =>
+  others().map((s) => `  "${s.name}"${s.status ? `: ${s.status}` : ''}`);
 
 export async function runMcp() {
   const server = new McpServer({ name: 'parley', version: VERSION }, { instructions: INSTRUCTIONS });
@@ -110,11 +130,15 @@ export async function runMcp() {
     'setup',
     {
       description:
-        "Give this Claude Code session its parley name. A new name creates an identity with its own id. A free name this machine already has makes this session that name again, with the same id as before. Ask your user for the name unless they gave one; it is what others see on your messages. Give your user the id it returns: others need it to reach this session.",
-      inputSchema: { name: z.string().trim().min(1).max(NAME_MAX).describe('The name others will see') },
+        "Give this Claude Code session its parley name, so sessions on other machines can reach it. Without a name it takes this session's Claude Code name. A new name creates an identity with its own id. A free name this machine already has makes this session that name again, with the same id as before. Give your user the id it returns: others need it to reach this session.",
+      inputSchema: {
+        name: z.string().trim().min(1).max(NAME_MAX).optional().describe("The name others will see; this session's Claude Code name if left out"),
+      },
     },
-    ({ name }) =>
+    ({ name: given }) =>
       reply(async () => {
+        const name = given ?? myName();
+        if (!name) throw new Error('this Claude Code session has no session name to take; give a name');
         const existing = locals().find((l) => sameName(l.name, name));
         if (held && existing?.address === held.address) {
           return `This session is already "${held.name}" (${held.address}).`;
@@ -142,10 +166,15 @@ export async function runMcp() {
     'list_agents',
     {
       description:
-        "Show this session's parley name and id, whether it is connected, and the names you can message: other parley names on this machine and everyone you have exchanged a message with. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then.",
+        "Show the names you can message: the Claude Code sessions on this machine, other parley names here, and everyone you have exchanged a message with. Also shows this session's parley name and id and whether it is connected. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then.",
     },
     () =>
-      named(async (a) => {
+      reply(async () => {
+        await starting;
+        const here = sessionLines();
+        const sessionsPart = ['', here.length ? 'Claude Code sessions on this machine:' : 'No other Claude Code sessions are open on this machine.', ...here];
+        if (!agent) return [unnamed(), ...sessionsPart].join('\n');
+        const a = agent;
         if (a.account.state().link || a.account.state().error) await a.account.recheck();
         const s = a.state();
         const lines = [
@@ -166,7 +195,8 @@ export async function runMcp() {
           const where = local ? (holder(n.address) ? 'this machine, open' : 'this machine, not open') : `first heard ${contacts[n.address]?.firstSeen.slice(0, 10)}`;
           return `  "${n.name}" (${n.address}): ${where}`;
         });
-        lines.push('', names.length ? 'Names you can message:' : 'No other names yet. Message an id to start.', ...names);
+        lines.push(...sessionsPart);
+        lines.push('', names.length ? 'parley names you can message:' : 'No parley names elsewhere yet. Message an id to start.', ...names);
         return lines.join('\n');
       }),
   );
@@ -175,14 +205,19 @@ export async function runMcp() {
     'send_message',
     {
       description:
-        'Send a message to another Claude Code session through parley. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from.',
+        'Send a message to another Claude Code session, on this machine or another. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from.',
       inputSchema: {
-        to: z.string().max(100).describe('A parley id like kfq-mxa-tzp, or a name list_agents shows'),
+        to: z.string().max(100).describe('A Claude Code session name on this machine, a parley id like kfq-mxa-tzp, or a name list_agents shows'),
         message: z.string().min(1).max(TEXT_MAX),
       },
     },
     ({ to, message }) =>
-      named(async (a) => {
+      reply(async () => {
+        const here = sessionNamed(to);
+        if (here) return sendHere(here, message);
+        await starting;
+        if (!agent) throw new Error(`no Claude Code session on this machine is named "${to.trim()}". ${unnamed()}`);
+        const a = agent;
         const address = addressFor(to, a.address);
         const name = await a.send(address, message);
         return `Delivered to "${name}" (${address}).`;

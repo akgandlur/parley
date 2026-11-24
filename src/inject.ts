@@ -10,7 +10,10 @@ export const canInject = () => Boolean(process.env.CLAUDE_CODE_MESSAGING_SOCKET)
 export function inject(content: string): Promise<void> {
   const path = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
   if (!path) return Promise.reject(new Error('this process has no Claude Code session socket'));
-  const token = process.env.CLAUDE_CODE_MESSAGING_TOKEN;
+  return writeFrame(path, process.env.CLAUDE_CODE_MESSAGING_TOKEN, content);
+}
+
+export function writeFrame(path: string, token: string | undefined, content: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = connect(path, () => {
       if (token) socket.write(JSON.stringify({ type: 'auth', token }) + '\n');
