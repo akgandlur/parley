@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>parley: message any Claude Code session from yours</title>
+    <title>parley: message their Claude from yours</title>
     <meta
       name="description"
-      content="Messages between Claude Code sessions, on one machine or across machines and people. A message lands in the other conversation by itself and wakes it if it is idle."
+      content="Messages between Claude Code sessions on different machines, and between people's. A message lands in the other conversation by itself and wakes it if it is idle."
     />
     <meta property="og:title" content="parley" />
     <meta
       property="og:description"
-      content="Message any Claude Code session from yours: by name on your machine, and across machines and between people."
+      content="Message their Claude from yours: Claude Code's own session messages, across machines and between people."
     />
     <meta name="color-scheme" content="light dark" />
     <link
@@ -283,11 +283,12 @@
 
     <main class="wrap">
       <div class="hero">
-        <h1>Message any Claude Code session from yours</h1>
+        <h1>Message their Claude from yours</h1>
         <p class="lede">
-          By name on your own machine, and across machines and between
-          people. A message lands in the other conversation by itself, and
-          wakes the session if it is idle.
+          Claude Code sessions on one machine can already message each
+          other. parley does the same across machines and between people: a
+          message lands in the other conversation by itself, and wakes the
+          session if it is idle.
         </p>
         <div class="actions">
           <a class="btn primary" href="#install">Install</a>
@@ -300,7 +301,7 @@
           <span>Paste this into Claude Code</span>
           <button class="btn primary sm" type="button" id="copy" aria-live="polite">Copy</button>
         </div>
-        <pre id="prompt">Set me up with parley, a tool that lets you message other Claude Code sessions: the ones on this machine, and ones on other machines, other people's included. Its code is at https://github.com/akgandlur/parley
+        <pre id="prompt">Set me up with parley, a tool that lets you message Claude Code sessions on other machines, other people's included. Its code is at https://github.com/akgandlur/parley
 
 Skip any step that is already done.
 
@@ -308,10 +309,9 @@ Skip any step that is already done.
 2. Run these two commands:
    claude plugin marketplace add akgandlur/parley
    claude plugin install parley@parley
-3. Ask me to type /reload-plugins, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
-4. Call the parley list_agents tool and show me the Claude Code sessions on this machine. Those can be messaged by name already.
-5. To reach other machines, call the parley setup tool with no name, so this session keeps its Claude Code name. Show me its parley name and id.
-6. If the parley tools show a link to open, give it to me: this machine is linked to my parley account once, and every session on it is then on the account.</pre>
+3. Ask me to press Enter to accept /reload-plugins, or to type it, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
+4. Call the parley setup tool with no name, so this session keeps its Claude Code name. Show me its parley name and id, and tell me to send the id to the person I want to work with.
+5. If the parley tools show a link to open, give it to me: this machine is linked to my parley account once, and every session on it is then on the account.</pre>
       </div>
 
       <section>
@@ -319,14 +319,14 @@ Skip any step that is already done.
         <ol class="rows steps card">
           <li>
             <div>
-              <strong>On your machine, sessions go by their names</strong>
-              <span>Ask one session to message another by its Claude Code session name. Nothing to set up, and nothing leaves the machine.</span>
+              <strong>Link your machine once</strong>
+              <span>Sign in with a link sent to your email. Every session on the machine is then on your account.</span>
             </div>
           </li>
           <li>
             <div>
-              <strong>Across machines, a session has an id</strong>
-              <span>Nine letters, like kfq-mxa-tzp. Link each machine to your account once; send the id to whoever should reach that session.</span>
+              <strong>Each session has an id</strong>
+              <span>Nine letters, like kfq-mxa-tzp. Send it to whoever should reach that session; after the first message, names work.</span>
             </div>
           </li>
           <li>
@@ -389,7 +389,7 @@ It came through parley, so reply with parley's send_message to "Tester A", not S
       <section>
         <h2>The relay</h2>
         <p class="prose">
-          Across machines, both sides connect out to a relay, so neither
+          Both sides connect out to a relay, so neither
           opens a port or needs access to the other's machine. The hosted
           relay lets a session on once its machine is linked to a parley
           account: you sign in with a link sent to your email. You can also

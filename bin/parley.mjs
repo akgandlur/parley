@@ -22497,9 +22497,7 @@ function inject(content) {
   const path = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
   if (!path)
     return Promise.reject(new Error("this process has no Claude Code session socket"));
-  return writeFrame(path, process.env.CLAUDE_CODE_MESSAGING_TOKEN, content);
-}
-function writeFrame(path, token, content) {
+  const token = process.env.CLAUDE_CODE_MESSAGING_TOKEN;
   return new Promise((resolve, reject) => {
     const socket = connect2(path, () => {
       if (token)
@@ -22518,61 +22516,32 @@ function writeFrame(path, token, content) {
 }
 
 // src/local.ts
-import { createHash as createHash3 } from "node:crypto";
 import { readdirSync as readdirSync3, readFileSync as readFileSync3 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join5 } from "node:path";
 var dir = () => join5(process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude"), "sessions");
-function alive2(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
-function sessions() {
+function myName() {
+  const socket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
+  if (!socket)
+    return;
   let files;
   try {
     files = readdirSync3(dir());
   } catch (err) {
     if (err.code === "ENOENT")
-      return [];
+      return;
     throw err;
   }
-  const out = [];
   for (const file of files) {
     if (!/^\d+\.json$/.test(file))
       continue;
-    let entry;
     try {
-      entry = JSON.parse(readFileSync3(join5(dir(), file), "utf8"));
-    } catch {
-      continue;
-    }
-    const { pid, name, messagingSocketPath: socket } = entry;
-    if (typeof pid !== "number" || !name || !socket || !alive2(pid))
-      continue;
-    out.push({ name, pid, socket, status: entry.status });
+      const entry = JSON.parse(readFileSync3(join5(dir(), file), "utf8"));
+      if (entry.messagingSocketPath === socket && entry.name)
+        return entry.name;
+    } catch {}
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
-}
-var own2 = () => process.env.CLAUDE_CODE_MESSAGING_SOCKET;
-var myName = () => sessions().find((s) => s.socket === own2())?.name;
-var others = () => sessions().filter((s) => s.socket !== own2());
-function sessionNamed(to) {
-  const hits = others().filter((s) => sameName(s.name, to));
-  if (hits.length > 1) {
-    throw new Error(`${hits.length} Claude Code sessions on this machine are named "${to.trim()}"; rename one with /rename first`);
-  }
-  return hits[0];
-}
-function peerToken(s) {
-  const file = join5(dir(), `${s.pid}.${createHash3("sha256").update(s.socket).digest("hex")}.key`);
-  const { peerToken } = JSON.parse(readFileSync3(file, "utf8"));
-  if (!peerToken)
-    throw new Error(`the Claude Code session "${s.name}" has no messaging key`);
-  return peerToken;
+  return;
 }
 
 // src/setup.ts
@@ -22597,9 +22566,9 @@ function setUp(name, relay) {
 }
 
 // src/mcp.ts
-var INSTRUCTIONS = `parley lets this Claude Code session message any Claude Code session by name: the ones on this machine, the way SendMessage does, and the ones on other machines and other people's.
+var INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's. It is for other machines only: to message a session on this machine, use SendMessage.
 
-A session on this machine is reached by its Claude Code session name, with no setup. To be reachable from other machines, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone elsewhere to reach this session. send_message sends to a session name, an id, or a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
+To be reachable, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
 The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.`;
 var log = (...parts) => console.error(new Date().toISOString(), "parley:", ...parts);
@@ -22607,7 +22576,7 @@ var text = (t) => ({ content: [{ type: "text", text: t }] });
 function unnamed() {
   const here = locals();
   if (!here.length) {
-    return "This Claude Code session has no parley name, and this machine has none yet. It reaches sessions on this machine without one. To reach or be reached from other machines, use the setup tool: with no name it takes this session's Claude Code name.";
+    return "This Claude Code session has no parley name, and this machine has none yet. Use the setup tool: with no name it takes this session's Claude Code name.";
   }
   const lines = here.map((l) => {
     const use = holder(l.address) ? "in use by another Claude Code session" : "free";
@@ -22634,22 +22603,6 @@ function shown(m) {
   ].join(`
 `);
 }
-async function sendHere(to, message) {
-  const me = myName();
-  if (!me)
-    throw new Error("this Claude Code session has no session name for the other one to reply to");
-  const content = [
-    `parley message from "${me}" (a Claude Code session on this machine):`,
-    "",
-    message,
-    "",
-    `It came through parley, so reply with parley's send_message to "${me}", not SendMessage.`
-  ].join(`
-`);
-  await writeFrame(to.socket, peerToken(to), content);
-  return `Delivered to "${to.name}", a Claude Code session on this machine.`;
-}
-var sessionLines = () => others().map((s) => `  "${s.name}"${s.status ? `: ${s.status}` : ""}`);
 async function runMcp() {
   const server = new McpServer({ name: "parley", version: VERSION }, { instructions: INSTRUCTIONS });
   let agent;
@@ -22720,15 +22673,8 @@ async function runMcp() {
     return `This session is now "${made.name}", a new name. Its id is ${made.address}. Give this id to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
   }));
   server.registerTool("list_agents", {
-    description: "Show the names you can message: the Claude Code sessions on this machine, other parley names here, and everyone you have exchanged a message with. Also shows this session's parley name and id and whether it is connected. If this machine is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses its sessions until then."
-  }, () => reply(async () => {
-    await starting;
-    const here = sessionLines();
-    const sessionsPart = ["", here.length ? "Claude Code sessions on this machine:" : "No other Claude Code sessions are open on this machine.", ...here];
-    if (!agent)
-      return [unnamed(), ...sessionsPart].join(`
-`);
-    const a = agent;
+    description: "Show this session's parley name and id, whether it is connected, and the names you can message: everyone you have exchanged a message with, and other parley names on this machine. If this machine is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses its sessions until then."
+  }, () => named(async (a) => {
     if (a.account.state().link || a.account.state().error)
       await a.account.recheck();
     const s = a.state();
@@ -22747,25 +22693,17 @@ async function runMcp() {
       const where = local ? holder(n.address) ? "this machine, open" : "this machine, not open" : `first heard ${contacts[n.address]?.firstSeen.slice(0, 10)}`;
       return `  "${n.name}" (${n.address}): ${where}`;
     });
-    lines.push(...sessionsPart);
-    lines.push("", names.length ? "parley names you can message:" : "No parley names elsewhere yet. Message an id to start.", ...names);
+    lines.push("", names.length ? "Names you can message:" : "No other names yet. Message an id to start.", ...names);
     return lines.join(`
 `);
   }));
   server.registerTool("send_message", {
-    description: "Send a message to another Claude Code session, on this machine or another. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from.",
+    description: "Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.",
     inputSchema: {
-      to: string2().max(100).describe("A Claude Code session name on this machine, a parley id like kfq-mxa-tzp, or a name list_agents shows"),
+      to: string2().max(100).describe("A parley id like kfq-mxa-tzp, or a name list_agents shows"),
       message: string2().min(1).max(TEXT_MAX)
     }
-  }, ({ to, message }) => reply(async () => {
-    const here = sessionNamed(to);
-    if (here)
-      return sendHere(here, message);
-    await starting;
-    if (!agent)
-      throw new Error(`no Claude Code session on this machine is named "${to.trim()}". ${unnamed()}`);
-    const a = agent;
+  }, ({ to, message }) => named(async (a) => {
     const address = addressFor(to, a.address);
     const name = await a.send(address, message);
     return `Delivered to "${name}" (${address}).`;
