@@ -250,6 +250,17 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     port,
     hostname,
     fetch(req, server) {
+      // Which of these ids have a session open, here or on a peer relay. It
+      // tells no more than sending to an id does.
+      if (req.method === 'POST' && new URL(req.url).pathname === '/online') {
+        return req.json().then(
+          (body: any) => {
+            const ids = Array.isArray(body?.ids) ? body.ids.slice(0, 500).map(String) : [];
+            return Response.json({ online: ids.filter((id: string) => online.has(id) || links.has(remote.get(id) ?? '')) });
+          },
+          () => new Response('send {"ids": [...]}\n', { status: 400 }),
+        );
+      }
       if (connections >= MAX_CONNECTIONS) {
         return new Response('relay is full\n', { status: 503 });
       }

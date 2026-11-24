@@ -171,8 +171,33 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      /* The prompt is long; it opens on request so the page under it stays in reach. */
+      #install:not(.open) pre {
+        max-height: 11.5rem;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(#000 55%, transparent);
+        mask-image: linear-gradient(#000 55%, transparent);
+      }
+      .more {
+        display: block;
+        width: 100%;
+        height: 2.75rem;
+        border: 0;
+        border-top: 1px solid var(--border);
+        border-radius: 0 0 calc(var(--radius) + 4px) calc(var(--radius) + 4px);
+        background: none;
+        color: var(--muted-foreground);
+        font: 500 0.875rem/1 var(--sans);
+        cursor: pointer;
+      }
+      .more:hover {
+        color: var(--foreground);
+      }
+      .btn {
+        min-width: 4.5rem;
+      }
       section {
-        padding-top: 4rem;
+        padding-top: 3.5rem;
       }
       h2 {
         font-size: 1.5rem;
@@ -291,7 +316,7 @@
           session if it is idle.
         </p>
         <div class="actions">
-          <a class="btn primary" href="#install">Install</a>
+          <button class="btn primary" type="button" data-copy-prompt>Copy setup prompt</button>
           <a class="btn" href="https://parley-relay.fly.dev/login">Sign in</a>
         </div>
       </div>
@@ -299,7 +324,7 @@
       <div class="card" id="install">
         <div class="card-head">
           <span>Paste this into Claude Code</span>
-          <button class="btn primary sm" type="button" id="copy" aria-live="polite">Copy</button>
+          <button class="btn sm" type="button" data-copy-prompt>Copy</button>
         </div>
         <pre id="prompt">Set me up with parley, a tool that lets you message Claude Code sessions on other machines, other people's included. Its code is at https://github.com/akgandlur/parley
 
@@ -312,6 +337,7 @@ Skip any step that is already done.
 3. Ask me to press Enter to accept /reload-plugins, or to type it, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
 4. Call the parley setup tool with no name, so this session keeps its Claude Code name. Show me its parley name and id, and tell me to send the id to the person I want to work with.
 5. If the parley tools show a link to open, give it to me: this machine is linked to my parley account once, and every session on it is then on the account.</pre>
+        <button class="more" type="button" id="more" aria-expanded="false">Show all</button>
       </div>
 
       <section>
@@ -408,23 +434,32 @@ It came through parley, so reply with parley's send_message to "Tester A", not S
     </footer>
 
     <script>
-      const button = document.getElementById('copy');
       const prompt = document.getElementById('prompt');
-      button.addEventListener('click', async () => {
-        const text = prompt.textContent.trim();
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch {
-          const range = document.createRange();
-          range.selectNodeContents(prompt);
-          const selection = getSelection();
-          selection.removeAllRanges();
-          selection.addRange(range);
-          document.execCommand('copy');
-          selection.removeAllRanges();
-        }
-        button.textContent = 'Copied';
-        setTimeout(() => (button.textContent = 'Copy'), 2000);
+      for (const button of document.querySelectorAll('[data-copy-prompt]')) {
+        const label = button.textContent;
+        button.addEventListener('click', async () => {
+          const text = prompt.textContent.trim();
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            document.getElementById('install').classList.add('open');
+            const range = document.createRange();
+            range.selectNodeContents(prompt);
+            const selection = getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand('copy');
+            selection.removeAllRanges();
+          }
+          button.textContent = 'Copied';
+          setTimeout(() => (button.textContent = label), 2000);
+        });
+      }
+      const more = document.getElementById('more');
+      more.addEventListener('click', () => {
+        const open = document.getElementById('install').classList.toggle('open');
+        more.textContent = open ? 'Show less' : 'Show all';
+        more.setAttribute('aria-expanded', String(open));
       });
     </script>
   </body>
