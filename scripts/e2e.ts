@@ -700,6 +700,14 @@ async function twoRelays() {
   check('a name on one relay reaches a name on the other', over?.text === `Delivered to "Wal" (${walAddr}).` && walSock.texts().some((t) => t.includes('across the relays')), over);
   const back = await wal.tool('send_message', { to: 'Eve', message: 'and back' });
   check('and the reply comes back', !back.failed && eveSock.texts().some((t) => t.includes('and back')), back);
+  const status = (r: { port?: number }, headers: Record<string, string> = {}) =>
+    fetch(`http://127.0.0.1:${r.port}/online`, { method: 'POST', headers, body: JSON.stringify({ ids: [eveAddr, walAddr, 'abc-def-ghj'] }) }).then((res) => res.json() as Promise<any>);
+  for (const [name, relay] of [['east', east], ['west', west]] as const) {
+    const seen = await status(relay);
+    check(`the ${name} relay tells its own machine who is online and who talked with whom`, seen.online.length === 2 && seen.talks[eveAddr]?.[0]?.[0] === walAddr && seen.talks[walAddr]?.[0]?.[0] === eveAddr && !seen.talks['abc-def-ghj'], seen);
+  }
+  const outside = await status(east, { 'x-forwarded-for': '203.0.113.9' });
+  check('a caller from elsewhere is told who is online and no more', outside.online.length === 2 && outside.talks === undefined, outside);
   const nobody = await eve.tool('send_message', { to: 'abc-def-ghj', message: 'anyone?' });
   check('an id on neither relay is not online', nobody.failed && nobody.text.includes('is not online'), nobody);
 

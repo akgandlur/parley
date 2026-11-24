@@ -43,6 +43,9 @@ export type Peering = {
 type PeerConn = { peer?: string; helloTimer?: ReturnType<typeof setTimeout> };
 
 const PEER_DIAL_MS = 3000;
+const TALK_SHARE_MS = 60_000;
+const TALK_KEEP_MS = 7 * 24 * 3600_000;
+const MAX_TALKS = 50;
 
 const sameSecret = (a: string, b: unknown) =>
   typeof b === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -75,10 +78,34 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
   // Addresses that turned out to be this relay under another spelling.
   const own = new Set<string>();
 
+  // Who each id has exchanged messages with and when last, in memory only.
+  const talks = new Map<string, Map<string, number>>();
+
   function toPeers(frame: object) {
     const text = JSON.stringify(frame);
     for (const link of links.values()) link.send(text);
   }
+
+  function talked(a: string, b: string, share: boolean) {
+    const now = Date.now();
+    const known = now - (talks.get(a)?.get(b) ?? 0) < TALK_SHARE_MS;
+    for (const [id, other] of [[a, b], [b, a]] as const) {
+      const peers = talks.get(id) ?? new Map<string, number>();
+      talks.set(id, peers);
+      peers.delete(other);
+      peers.set(other, now);
+      if (peers.size > MAX_TALKS) peers.delete(peers.keys().next().value as string);
+    }
+    if (share && !known) toPeers({ t: 'talk', a, b });
+  }
+
+  const talkSweep = setInterval(() => {
+    const cutoff = Date.now() - TALK_KEEP_MS;
+    for (const [id, peers] of talks) {
+      for (const [other, at] of peers) if (at < cutoff) peers.delete(other);
+      if (!peers.size) talks.delete(id);
+    }
+  }, 3600_000);
 
   function forget(peer: string) {
     for (const [address, at] of remote) if (at === peer) remote.delete(address);
@@ -135,11 +162,15 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
       if (remote.get(msg.address) === peer) remote.delete(msg.address);
     } else if (msg.t === 'fwd' && typeof msg.to === 'string' && typeof msg.from === 'string') {
       const target = online.get(msg.to);
-      if (target) target.send(JSON.stringify({ t: 'recv', from: msg.from, payload: msg.payload }));
-      else links.get(peer)?.send(JSON.stringify({ t: 'nack', to: msg.to, from: msg.from, ref: msg.ref }));
+      if (target) {
+        target.send(JSON.stringify({ t: 'recv', from: msg.from, payload: msg.payload }));
+        talked(msg.from, msg.to, true);
+      } else links.get(peer)?.send(JSON.stringify({ t: 'nack', to: msg.to, from: msg.from, ref: msg.ref }));
     } else if (msg.t === 'nack' && typeof msg.to === 'string' && typeof msg.from === 'string') {
       if (remote.get(msg.to) === peer) remote.delete(msg.to);
       online.get(msg.from)?.send(JSON.stringify({ t: 'undeliverable', to: msg.to, ref: msg.ref }));
+    } else if (msg.t === 'talk' && typeof msg.a === 'string' && typeof msg.b === 'string') {
+      talked(msg.a, msg.b, false);
     }
   }
 
@@ -251,12 +282,18 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     hostname,
     fetch(req, server) {
       // Which of these ids have a session open, here or on a peer relay. It
-      // tells no more than sending to an id does.
+      // tells no more than sending to an id does. Who each has talked with
+      // tells more, so only a caller on this machine is given it.
       if (req.method === 'POST' && new URL(req.url).pathname === '/online') {
+        const local = LOOPBACK.has(clientIp(req, server.requestIP(req)?.address ?? ''));
         return req.json().then(
           (body: any) => {
-            const ids = Array.isArray(body?.ids) ? body.ids.slice(0, 500).map(String) : [];
-            return Response.json({ online: ids.filter((id: string) => online.has(id) || links.has(remote.get(id) ?? '')) });
+            const ids: string[] = Array.isArray(body?.ids) ? body.ids.slice(0, 500).map(String) : [];
+            const answer: { online: string[]; talks?: Record<string, [string, number][]> } = {
+              online: ids.filter((id) => online.has(id) || links.has(remote.get(id) ?? '')),
+            };
+            if (local) answer.talks = Object.fromEntries(ids.filter((id) => talks.has(id)).map((id) => [id, [...talks.get(id)!].reverse()]));
+            return Response.json(answer);
           },
           () => new Response('send {"ids": [...]}\n', { status: 400 }),
         );
@@ -340,6 +377,7 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
             payload: msg.payload,
           }),
         );
+        talked(ws.data.address!, msg.to, true);
       },
       close(ws) {
         connections--;
@@ -359,6 +397,7 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
   const stop = server.stop.bind(server);
   server.stop = (closeActive?: boolean) => {
     clearInterval(dialTimer);
+    clearInterval(talkSweep);
     for (const link of links.values()) link.close();
     void peerServer?.stop(closeActive);
     return stop(closeActive);
