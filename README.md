@@ -131,7 +131,7 @@ A machine can hold as many as it has Claude Code sessions.
 
 ## Accounts
 
-The hosted relay at https://vmi3690410.contaboserver.net lets a name on only
+The hosted relay at https://parley-relay.fly.dev lets a name on only
 once it is linked to a parley account there. An account is an email address
 the cloud has checked: you sign in with a link sent to it, and there is no
 password.

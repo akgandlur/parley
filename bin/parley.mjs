@@ -22131,7 +22131,7 @@ var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.7.1";
+var VERSION = "0.7.2";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 

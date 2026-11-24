@@ -1,6 +1,6 @@
 {
   "name": "parley",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Messages between Claude Code sessions on different machines, and between people's: they land in the other conversation by themselves, the way SendMessage does on one machine",
   "author": {
     "name": "akgandlur"
@@ -21,8 +21,8 @@
         "mcp"
       ],
       "env": {
-        "PARLEY_RELAY": "wss://vmi3690410.contaboserver.net",
-        "PARLEY_CLOUD": "https://vmi3690410.contaboserver.net"
+        "PARLEY_RELAY": "wss://parley-relay.fly.dev",
+        "PARLEY_CLOUD": "https://parley-relay.fly.dev"
       }
     }
   }
