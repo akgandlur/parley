@@ -6982,19 +6982,14 @@ import { join as join8 } from "path";
 
 // src/crypto.ts
 import {
-  createCipheriv,
-  createDecipheriv,
   createHash,
   createPrivateKey,
   createPublicKey,
-  diffieHellman,
   generateKeyPairSync,
-  hkdfSync,
   sign,
   verify
 } from "node:crypto";
 var LETTERS = "abcdefghijklmnopqrstuvwxyz";
-var TAG_BYTES = 16;
 function jwkField(key, field) {
   const value = key.export({ format: "jwk" })[field];
   if (!value)
@@ -7040,57 +7035,6 @@ function verifyText(publicKey, text, sig) {
     format: "jwk"
   });
   return verify(null, Buffer.from(text), key, Buffer.from(sig, "base64url"));
-}
-var P = 2n ** 255n - 19n;
-var littleEndian = (buf) => buf.reduceRight((n, byte) => n << 8n | BigInt(byte), 0n);
-function power(base, exp) {
-  let out = 1n;
-  base %= P;
-  for (;exp > 0n; exp >>= 1n) {
-    if (exp & 1n)
-      out = out * base % P;
-    base = base * base % P;
-  }
-  return out;
-}
-function exchangeKeyOf(publicKey) {
-  const raw = Buffer.from(publicKey, "base64url");
-  raw[31] = raw[31] & 127;
-  const y = littleEndian(raw);
-  let u = (1n + y) * power((1n - y + P) % P, P - 2n) % P;
-  const out = Buffer.alloc(32);
-  for (let i = 0;i < 32; i++, u >>= 8n)
-    out[i] = Number(u & 255n);
-  return createPublicKey({ key: { kty: "OKP", crv: "X25519", x: out.toString("base64url") }, format: "jwk" });
-}
-function exchangePrivateOf(id) {
-  const d = createHash("sha512").update(Buffer.from(id.privateKey, "base64url")).digest().subarray(0, 32);
-  const x = exchangeKeyOf(id.publicKey).export({ format: "jwk" }).x;
-  return createPrivateKey({ key: { kty: "OKP", crv: "X25519", d: d.toString("base64url"), x }, format: "jwk" });
-}
-function messageKey(shared, eph, to) {
-  return Buffer.from(hkdfSync("sha256", shared, Buffer.from(`${eph}
-${to}`), Buffer.from("parley message"), 32));
-}
-var NONCE = Buffer.alloc(12);
-function sealTo(theirKey, plaintext) {
-  const pair = generateKeyPairSync("x25519");
-  const eph = jwkField(pair.publicKey, "x");
-  const shared = diffieHellman({ privateKey: pair.privateKey, publicKey: exchangeKeyOf(theirKey) });
-  const cipher = createCipheriv("aes-256-gcm", messageKey(shared, eph, theirKey), NONCE);
-  const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
-  return { eph, box: body.toString("base64url") };
-}
-function openFor(me, eph, box) {
-  const shared = diffieHellman({
-    privateKey: exchangePrivateOf(me),
-    publicKey: createPublicKey({ key: { kty: "OKP", crv: "X25519", x: eph }, format: "jwk" })
-  });
-  const raw = Buffer.from(box, "base64url");
-  const split = raw.length - TAG_BYTES;
-  const decipher = createDecipheriv("aes-256-gcm", messageKey(shared, eph, me.publicKey), NONCE);
-  decipher.setAuthTag(raw.subarray(split));
-  return Buffer.concat([decipher.update(raw.subarray(0, split)), decipher.final()]).toString("utf8");
 }
 
 // src/attest.ts
@@ -22137,9 +22081,159 @@ ${digest}`)
 
 // src/agent.ts
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync as existsSync4, rmSync as rmSync2 } from "node:fs";
+import { existsSync as existsSync4, rmSync as rmSync2 } from "node:fs";
 import { connect } from "node:net";
 import { join as join4 } from "node:path";
+
+// src/ratchet.ts
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash as createHash3,
+  createHmac,
+  createPublicKey as createPublicKey2,
+  diffieHellman,
+  generateKeyPairSync as generateKeyPairSync2,
+  hkdfSync
+} from "node:crypto";
+var MAX_SKIP = 200;
+var TAG = 16;
+function newPair() {
+  const pair = generateKeyPairSync2("x25519");
+  return { publicKey: pair.publicKey.export({ format: "jwk" }).x, privateKey: pair.privateKey };
+}
+var dh = (mine, theirs) => diffieHellman({
+  privateKey: mine,
+  publicKey: createPublicKey2({ key: { kty: "OKP", crv: "X25519", x: theirs }, format: "jwk" })
+});
+var hkdf = (ikm, salt, info, bytes) => Buffer.from(hkdfSync("sha256", ikm, salt, Buffer.from(info), bytes));
+function rootStep(root, shared) {
+  const out = hkdf(shared, root, "parley ratchet root", 64);
+  return [out.subarray(0, 32), out.subarray(32)];
+}
+function chainStep(chain) {
+  const mac = (byte) => createHmac("sha256", chain).update(Buffer.from([byte])).digest();
+  return [mac(2), mac(1)];
+}
+function offer(me, to) {
+  const pair = newPair();
+  return { pair, hello: { key: me.publicKey, e: pair.publicKey, sig: signText(me, `parley hs1
+${to}
+${pair.publicKey}`) } };
+}
+var checkOffer = (hello, myAddress) => verifyText(hello.key, `parley hs1
+${myAddress}
+${hello.e}`, hello.sig);
+function secret(shared, a, b) {
+  const transcript = createHash3("sha256").update(["parley handshake", a.key, a.e, b.key, b.e].join(`
+`)).digest();
+  return { root: hkdf(shared, transcript, "parley handshake", 32), ad: transcript };
+}
+function answer(me, from, hello) {
+  const pair = newPair();
+  const reply = { key: me.publicKey, e: pair.publicKey, sig: signText(me, `parley hs2
+${from}
+${hello.e}
+${pair.publicKey}`) };
+  const { root, ad } = secret(dh(pair.privateKey, hello.e), hello, reply);
+  const ratchet = { ad, root, mine: pair, ns: 0, nr: 0, pn: 0, skipped: new Map };
+  return { reply, ratchet };
+}
+function finish(mine, pair, myAddress, reply) {
+  if (!verifyText(reply.key, `parley hs2
+${myAddress}
+${mine.e}
+${reply.e}`, reply.sig)) {
+    throw new Error("the handshake answer is not signed by the key it names");
+  }
+  const { root, ad } = secret(dh(pair.privateKey, reply.e), mine, reply);
+  const next = newPair();
+  const [newRoot, sending] = rootStep(root, dh(next.privateKey, reply.e));
+  return { ad, root: newRoot, mine: next, theirs: reply.e, sending, ns: 0, nr: 0, pn: 0, skipped: new Map };
+}
+var canSeal = (r) => r.sending !== undefined;
+var headerBytes = (h) => Buffer.from(`${h.dh}
+${h.pn}
+${h.n}`);
+function cipherKeys(messageKey) {
+  const out = hkdf(messageKey, Buffer.alloc(32), "parley message key", 44);
+  return { key: out.subarray(0, 32), nonce: out.subarray(32) };
+}
+function seal(r, plaintext) {
+  if (!r.sending)
+    throw new Error("this side cannot send before the other has");
+  const [chain, messageKey] = chainStep(r.sending);
+  r.sending = chain;
+  const h = { dh: r.mine.publicKey, pn: r.pn, n: r.ns++ };
+  const { key, nonce } = cipherKeys(messageKey);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  cipher.setAAD(Buffer.concat([r.ad, headerBytes(h)]));
+  const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  return { h, c: body.toString("base64url") };
+}
+function decrypt(r, messageKey, h, c) {
+  const raw = Buffer.from(c, "base64url");
+  const { key, nonce } = cipherKeys(messageKey);
+  const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+  decipher.setAAD(Buffer.concat([r.ad, headerBytes(h)]));
+  decipher.setAuthTag(raw.subarray(raw.length - TAG));
+  return Buffer.concat([decipher.update(raw.subarray(0, raw.length - TAG)), decipher.final()]).toString("utf8");
+}
+function skipTo(r, until) {
+  if (!r.receiving || !r.theirs)
+    return;
+  if (until - r.nr > MAX_SKIP)
+    throw new Error("too many messages were skipped");
+  while (r.nr < until) {
+    const [chain, messageKey] = chainStep(r.receiving);
+    r.receiving = chain;
+    r.skipped.set(`${r.theirs}
+${r.nr++}`, messageKey);
+  }
+  while (r.skipped.size > MAX_SKIP)
+    r.skipped.delete(r.skipped.keys().next().value);
+}
+function open2(r, { h, c }) {
+  if (!h || typeof h.dh !== "string" || !Number.isInteger(h.pn) || !Number.isInteger(h.n) || h.pn < 0 || h.n < 0) {
+    throw new Error("the message has no usable header");
+  }
+  const kept = r.skipped.get(`${h.dh}
+${h.n}`);
+  if (kept) {
+    const text = decrypt(r, kept, h, c);
+    r.skipped.delete(`${h.dh}
+${h.n}`);
+    return text;
+  }
+  const next = { ...r, skipped: new Map(r.skipped) };
+  if (h.dh !== next.theirs) {
+    skipTo(next, h.pn);
+    next.pn = next.ns;
+    next.ns = 0;
+    next.nr = 0;
+    next.theirs = h.dh;
+    [next.root, next.receiving] = rootStep(next.root, dh(next.mine.privateKey, h.dh));
+    next.mine = newPair();
+    [next.root, next.sending] = rootStep(next.root, dh(next.mine.privateKey, h.dh));
+  }
+  skipTo(next, h.n);
+  if (!next.receiving)
+    throw new Error("the message is from before this conversation");
+  const [chain, messageKey] = chainStep(next.receiving);
+  next.receiving = chain;
+  next.nr++;
+  const text = decrypt(next, messageKey, h, c);
+  Object.assign(r, next);
+  return text;
+}
+function safetyNumber(a, b) {
+  const digest = createHash3("sha512").update(["parley safety number", ...[a, b].sort()].join(`
+`)).digest();
+  const groups = [];
+  for (let i = 0;i < 6; i++)
+    groups.push(String(digest.readUIntBE(i * 5, 5) % 1e5).padStart(5, "0"));
+  return groups.join(" ");
+}
 
 // src/relay.ts
 var RELAY_AUTH = "parley relay auth ";
@@ -22159,6 +22253,9 @@ var PROBE_WAIT_MS = 1e4;
 var ANSWER_MS = 15000;
 
 class Offline extends Error {
+}
+
+class Stale extends Error {
 }
 var explain = (err) => err instanceof Error ? err.message : String(err);
 async function retireOldNode(home, log) {
@@ -22205,8 +22302,7 @@ async function startAgent(home, log, onMessage) {
   let lastProbe = 0;
   let firstAnswer = () => {};
   const answered = new Promise((resolve) => firstAnswer = resolve);
-  const keys = new Map;
-  const keyWaits = new Map;
+  const convs = new Map;
   const acks = new Map;
   const seen = new Set;
   const account = startAccount(home, me, log, (att) => {
@@ -22217,11 +22313,6 @@ async function startAgent(home, log, onMessage) {
       connectRelay();
     }
   });
-  const keyOf = (to) => loadContacts()[to]?.key ?? keys.get(to);
-  function record(entry) {
-    appendFileSync(join4(home, "messages.jsonl"), JSON.stringify(entry) + `
-`);
-  }
   function verify(att, key, who) {
     if (typeof att !== "string")
       return;
@@ -22301,15 +22392,37 @@ async function startAgent(home, log, onMessage) {
       throw new Error("the message is too long for the relay");
     socket.send(frame);
   }
+  function newConv() {
+    let resolve = () => {};
+    let reject = (_) => {};
+    const ready = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    ready.catch(() => {});
+    return { ready, resolve, reject };
+  }
+  function drop(from, err) {
+    const conv = convs.get(from);
+    convs.delete(from);
+    conv?.reject(err);
+    for (const [id, wait] of acks) {
+      if (wait.to !== from)
+        continue;
+      acks.delete(id);
+      wait.reject(err);
+    }
+  }
   function failAll(err) {
     for (const [id, wait] of acks) {
       acks.delete(id);
       wait.reject(err);
     }
-    for (const [to, waits] of keyWaits) {
-      keyWaits.delete(to);
-      for (const w of waits)
-        w.reject(err);
+    for (const [to, conv] of convs) {
+      if (conv.ratchet && canSeal(conv.ratchet))
+        continue;
+      convs.delete(to);
+      conv.reject(err);
     }
   }
   function onRelay(msg) {
@@ -22338,99 +22451,124 @@ async function startAgent(home, log, onMessage) {
       const ref = String(msg.ref ?? "");
       if (ref.startsWith("probe:"))
         return replaceRelay("the relay no longer knows this connection");
-      const offline = new Offline("not online");
-      if (ref.startsWith("key:")) {
-        const waits = keyWaits.get(msg.to) ?? [];
-        keyWaits.delete(msg.to);
-        for (const w of waits)
-          w.reject(offline);
-      } else if (ref.startsWith("msg:")) {
-        const wait = acks.get(ref.slice(4));
-        acks.delete(ref.slice(4));
-        wait?.reject(offline);
+      if (ref.startsWith("hs:") || ref.startsWith("msg:"))
+        drop(String(msg.to), new Offline("not online"));
+    }
+  }
+  function knownKey(from, key) {
+    if (typeof key !== "string" || addressOf(key) !== from)
+      return false;
+    if (isSavedKey(from, key))
+      return true;
+    log(`${from} showed a different key than this id had before, so it is not answered`);
+    return false;
+  }
+  function onPeer(from, p) {
+    if (p?.v !== 3)
+      return;
+    const conv = convs.get(from);
+    if (p.kind === "hs1") {
+      if (!knownKey(from, p.key) || !checkOffer(p, address))
+        return;
+      if (conv?.offered && address < from)
+        return;
+      const made = answer(me, from, p);
+      const next = conv?.offered ? conv : newConv();
+      if (conv && next !== conv)
+        drop(from, new Stale("the other side started the conversation again"));
+      next.offered = undefined;
+      next.ratchet = made.ratchet;
+      next.key = p.key;
+      convs.set(from, next);
+      relaySend(from, "hs2", { v: 3, kind: "hs2", ...made.reply });
+    } else if (p.kind === "hs2") {
+      if (!conv?.offered || !knownKey(from, p.key))
+        return;
+      try {
+        conv.ratchet = finish(conv.offered.hello, conv.offered.pair, address, p);
+      } catch (err) {
+        return drop(from, err instanceof Error ? err : new Error(String(err)));
+      }
+      conv.key = p.key;
+      conv.offered = undefined;
+      conv.resolve();
+    } else if (p.kind === "reset") {
+      if (conv)
+        drop(from, new Stale("the other side lost the conversation"));
+    } else if (p.kind === "m") {
+      if (!conv?.ratchet || !conv.key)
+        return relaySend(from, "reset", { v: 3, kind: "reset" });
+      let inner;
+      try {
+        inner = JSON.parse(open2(conv.ratchet, p));
+      } catch (err) {
+        return log(`a message from ${from} was dropped:`, explain(err));
+      }
+      conv.resolve();
+      if (inner.t === "ack") {
+        const wait = acks.get(String(inner.id));
+        if (!wait || wait.to !== from)
+          return;
+        acks.delete(String(inner.id));
+        saveContact(from, String(inner.name), conv.key);
+        wait.resolve(String(inner.name));
+      } else if (inner.t === "msg") {
+        receive(from, conv, inner).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
       }
     }
   }
-  function onPeer(from, p) {
-    if (p?.v !== 2 || typeof p.key !== "string" || addressOf(p.key) !== from)
-      return;
-    if (p.kind === "key?") {
-      relaySend(from, "key-reply", { v: 2, kind: "key", key: me.publicKey });
-    } else if (p.kind === "key") {
-      keys.set(from, p.key);
-      const waits = keyWaits.get(from) ?? [];
-      keyWaits.delete(from);
-      for (const w of waits)
-        w.resolve(p.key);
-    } else if (p.kind === "ack") {
-      const wait = acks.get(String(p.id));
-      if (!wait || wait.to !== from || wait.key !== p.key)
-        return;
-      if (!verifyText(p.key, `parley ack
-${address}
-${p.id}
-${p.name}`, String(p.sig)))
-        return;
-      acks.delete(String(p.id));
-      saveContact(from, String(p.name), p.key);
-      wait.resolve(String(p.name));
-    } else if (p.kind === "msg") {
-      receive(from, p).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
-    }
-  }
-  async function receive(from, p) {
-    if (!isSavedKey(from, p.key))
-      throw new Error("it is signed by a different key than this id had before");
-    if (!verifyText(p.key, `parley message
-${address}
-${p.eph}
-${p.box}`, String(p.sig))) {
-      throw new Error("the signature does not check out");
-    }
-    const inner = JSON.parse(openFor(me, String(p.eph), String(p.box)));
+  async function receive(from, conv, inner) {
+    const key = conv.key;
     const id = String(inner.id);
     const name = String(inner.name);
     if (!seen.has(id)) {
       seen.add(id);
-      const verified = verify(inner.att, p.key, from);
-      saveContact(from, name, p.key);
-      const m = { id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at) };
-      record({ dir: "in", ...m });
-      await onMessage(m);
+      const verified = verify(inner.att, key, from);
+      saveContact(from, name, key);
+      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at) });
     }
-    relaySend(from, `ack:${id}`, {
-      v: 2,
-      kind: "ack",
-      key: me.publicKey,
-      id,
-      name: me.name,
-      sig: signText(me, `parley ack
-${from}
-${id}
-${me.name}`)
-    });
+    if (convs.get(from) !== conv || !conv.ratchet)
+      return;
+    relaySend(from, `ack:${id}`, { v: 3, kind: "m", ...seal(conv.ratchet, JSON.stringify({ t: "ack", id, name: me.name })) });
   }
-  function askKey(to) {
-    return new Promise((resolve, reject) => {
-      const waits = keyWaits.get(to) ?? [];
-      waits.push({ resolve, reject });
-      keyWaits.set(to, waits);
-      if (waits.length === 1) {
-        try {
-          relaySend(to, `key:${to}`, { v: 2, kind: "key?", key: me.publicKey });
-        } catch (err) {
-          keyWaits.delete(to);
-          return reject(err);
-        }
+  async function converse(to) {
+    let conv = convs.get(to);
+    if (!conv) {
+      conv = newConv();
+      conv.offered = offer(me, to);
+      convs.set(to, conv);
+      const mine = conv;
+      try {
+        relaySend(to, `hs:${to}`, { v: 3, kind: "hs1", ...conv.offered.hello });
+      } catch (err) {
+        convs.delete(to);
+        throw err;
       }
       setTimeout(() => {
-        const left = keyWaits.get(to);
-        if (!left?.length)
-          return;
-        keyWaits.delete(to);
-        for (const w of left)
-          w.reject(new Error(`${to} did not answer`));
+        if (convs.get(to) === mine && !(mine.ratchet && canSeal(mine.ratchet))) {
+          drop(to, new Error(`${to} did not answer. It may be on a parley older than 0.9`));
+        }
       }, ANSWER_MS);
+    }
+    await conv.ready;
+    return conv;
+  }
+  async function sendOnce(to, text) {
+    const conv = await converse(to);
+    const id = randomBytes(9).toString("base64url");
+    const sealed = seal(conv.ratchet, JSON.stringify({ t: "msg", id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
+    return new Promise((resolve, reject) => {
+      acks.set(id, { to, resolve, reject });
+      setTimeout(() => {
+        if (acks.delete(id))
+          reject(new Error(`${to} did not confirm it got the message`));
+      }, ANSWER_MS);
+      try {
+        relaySend(to, `msg:${id}`, { v: 3, kind: "m", ...sealed });
+      } catch (err) {
+        acks.delete(id);
+        reject(err);
+      }
     });
   }
   connectRelay();
@@ -22451,34 +22589,23 @@ ${me.name}`)
       if (to === address)
         throw new Error("that is this session's own id");
       try {
-        const key = keyOf(to) ?? await askKey(to);
-        const id = randomBytes(9).toString("base64url");
-        const at = new Date().toISOString();
-        const { eph, box } = sealTo(key, JSON.stringify({ id, name: me.name, text, at, att: account.att() }));
-        const name = await new Promise((resolve, reject) => {
-          acks.set(id, { to, key, resolve, reject });
-          setTimeout(() => {
-            if (acks.delete(id))
-              reject(new Error(`${to} did not confirm it got the message`));
-          }, ANSWER_MS);
-          try {
-            relaySend(to, `msg:${id}`, { v: 2, kind: "msg", key: me.publicKey, eph, box, sig: signText(me, `parley message
-${to}
-${eph}
-${box}`) });
-          } catch (err) {
-            acks.delete(id);
-            reject(err);
-          }
+        return await sendOnce(to, text).catch((err) => {
+          if (err instanceof Stale)
+            return sendOnce(to, text);
+          throw err;
         });
-        record({ dir: "out", id, to: { name, address: to }, text, at });
-        return name;
       } catch (err) {
         if (err instanceof Offline && err.message === "not online") {
           throw new Error(`${to} is not online: no Claude Code session with that parley name is open right now`);
         }
         throw err;
       }
+    },
+    safetyNumber(to) {
+      const theirs = loadContacts()[to]?.key;
+      if (!theirs)
+        throw new Error(`no message has been exchanged with ${to} yet, so there is no key of theirs to compare`);
+      return safetyNumber(me.publicKey, theirs);
     },
     close() {
       closed = true;
@@ -22707,6 +22834,14 @@ async function runMcp() {
     const address = addressFor(to, a.address);
     const name = await a.send(address, message);
     return `Delivered to "${name}" (${address}).`;
+  }));
+  server.registerTool("safety_number", {
+    description: "Show the safety number this session shares with a session it has exchanged a message with. The two people compare it over a call or in person: if both see the same number, nobody sits between their sessions. Use it when your user wants to be sure who they are talking to.",
+    inputSchema: { with: string2().max(100).describe("A parley id, or a name list_agents shows") }
+  }, ({ with: who }) => named(async (a) => {
+    const address = addressFor(who, a.address);
+    return `Safety number with ${address}: ${a.safetyNumber(address)}
+It is the same on their side if nobody is in the middle. Your user compares it with the other person over a call or in person.`;
   }));
   server.registerTool("cloud_link", {
     description: "Tie this machine to your user's parley account. The hosted relay needs this before a session here can connect, and it is done once per machine: every session on it is then on the account. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",

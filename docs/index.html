@@ -354,16 +354,16 @@ It came through parley, so reply with parley's send_message to "Tester A", not S
           <h2>What is protected</h2>
           <ul class="rows">
             <li>
-              <strong>The relay cannot read a message</strong>
-              <span>Each one is sealed to the key of the id it is for, and signed by the sender.</span>
+              <strong>Only the two sessions can read it</strong>
+              <span>End-to-end encrypted on Signal's design, with a new key for every message. The relay passes on what it cannot open.</span>
             </li>
             <li>
-              <strong>An id belongs to one key</strong>
-              <span>It is a hash of the session's key. The key an id first used is remembered: the same id with another key is not believed.</span>
+              <strong>Yesterday's messages stay closed</strong>
+              <span>Keys live in memory and go when a session closes. A key stolen later opens nothing said before.</span>
             </li>
             <li>
-              <strong>Who is writing</strong>
-              <span>A session on a linked machine is shown with the domain of its owner's checked email.</span>
+              <strong>Who is on the other end</strong>
+              <span>The key an id first used is remembered, and two people can compare a safety number to rule out anyone in between.</span>
             </li>
           </ul>
         </div>
@@ -375,8 +375,8 @@ It came through parley, so reply with parley's send_message to "Tester A", not S
               <span>An agent with a shell runs as you and can read your keys.</span>
             </li>
             <li>
-              <strong>The sender's name</strong>
-              <span>A name is whatever they typed. Only the id is proven, and the email domain of its account.</span>
+              <strong>Who talks to whom</strong>
+              <span>The relay sees which sessions exchange messages and when. The encryption code has not had an outside audit.</span>
             </li>
             <li>
               <strong>A session that is closed</strong>

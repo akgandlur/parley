@@ -195,6 +195,20 @@ export async function runMcp() {
   );
 
   server.registerTool(
+    'safety_number',
+    {
+      description:
+        "Show the safety number this session shares with a session it has exchanged a message with. The two people compare it over a call or in person: if both see the same number, nobody sits between their sessions. Use it when your user wants to be sure who they are talking to.",
+      inputSchema: { with: z.string().max(100).describe('A parley id, or a name list_agents shows') },
+    },
+    ({ with: who }) =>
+      named(async (a) => {
+        const address = addressFor(who, a.address);
+        return `Safety number with ${address}: ${a.safetyNumber(address)}\nIt is the same on their side if nobody is in the middle. Your user compares it with the other person over a call or in person.`;
+      }),
+  );
+
+  server.registerTool(
     'cloud_link',
     {
       description:

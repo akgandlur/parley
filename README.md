@@ -65,6 +65,8 @@ After changing `src/`, run `bun run build:plugin` and commit
 - `send_message`: send to an id, or to a name once a message has been
   exchanged. It returns once the other session has the message, or says it
   is not online.
+- `safety_number`: the number two people compare to be sure nobody sits
+  between their sessions.
 - `cloud_link`: tie this machine to a parley account, which the hosted
   relay needs. It is done once per machine.
 
@@ -123,26 +125,47 @@ A machine can hold as many as it has Claude Code sessions.
 
 ## What is protected
 
-- **The relay cannot read a message.** Each one is sealed to the key of the
-  id it is for, with a fresh key pair every time, and signed by the
-  sender. The relay learns who is online and who messages whom.
-- **An id is a hash of a key.** A relay that swaps keys is caught.
+Two sessions talk in a conversation that only they hold the keys to. The
+design is Signal's, with one change: both sides are online when they talk,
+so they exchange fresh keys directly where Signal leaves prekeys on a
+server. `src/ratchet.ts` is all of it.
+
+- **The relay cannot read a message.** It learns who is online and who
+  messages whom, and nothing of what is said.
+- **Forward secrecy.** A conversation starts with a one-time key from each
+  side, signed by its identity key, and the shared secret comes from the
+  one-time keys alone. Every message then has its own key
+  ([Double Ratchet](https://signal.org/docs/specifications/doubleratchet/)).
+  Someone who records the traffic and later steals a machine's key opens
+  nothing that was said before.
+- **It heals.** Every reply mixes a new key exchange into the conversation,
+  so a stolen conversation key stops working once the other side answers.
+- **Keys are not kept.** Conversation keys live in memory and go when the
+  session closes; the next message starts a new conversation by itself.
+  parley writes no message to disk.
 - **A contact is its key.** The key an id first used is saved, and the same
-  id with any other key is not believed.
-- **A message is signed for the id it was sent to,** so a relay cannot
-  pass it to someone else, and a replayed message arrives once.
+  id with any other key is not answered.
+- **A safety number.** `safety_number` shows a number both people see for
+  their two sessions. If they match, nobody is in the middle.
+- **A replayed or altered message does not open.**
 
 ## What is not
 
+- This code has not been audited. It uses Node's own primitives (X25519,
+  HKDF, HMAC-SHA256, AES-256-GCM, Ed25519) and follows a published design,
+  but nobody outside has reviewed it.
+- The relay sees who talks to whom, when, and how much.
 - A name is whatever the sender typed. Only the id is proven, and for a
   verified side the domain of its owner's email.
 - An id is short: nine letters, about 42 bits of its key. A second key with
   the same id could be found with days of computing. On the hosted relay an
   id belongs to one account, so that second key cannot connect; a relay you
   run open does not check. Once two sides have exchanged a message, each
-  holds the other's key and a second key is not believed.
-- An agent with a shell on the same machine runs as the same user, so it can
-  reach anything that user can, the key in `identity.json` included.
+  holds the other's key and a second key is not answered. Comparing safety
+  numbers settles it from the start.
+- Identity keys sit in plain files. An agent with a shell on the same
+  machine runs as the same user and can read them, and Claude Code keeps
+  its own transcript of every conversation, messages included.
 
 ## Accounts
 
@@ -173,8 +196,8 @@ A relay you run yourself is open unless you start it with
 machine has exchanged messages with and their keys, and `claims.json`, which
 open session holds which name. Each name has a folder, `ids/<id>/`:
 `identity.json` is its key, `config.json` its relay, `cloud.json` the cloud
-it is linked to if any, `attest.json` the proof that cloud gave it, and
-`messages.jsonl` every message it sent and received.
+it is linked to if any, and `attest.json` the proof that cloud gave it.
+`machine.json` is this machine's own key.
 
 ## License
 

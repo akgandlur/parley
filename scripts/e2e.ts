@@ -9,7 +9,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ServerWebSocket } from 'bun';
-import { addressOf, newIdentity, openFor, sealTo, signText, verifyText, type Identity } from '../src/crypto';
+import { addressOf, newIdentity, signText, verifyText, type Identity } from '../src/crypto';
+import { answer, canSeal, checkOffer, finish, offer, open, safetyNumber, seal } from '../src/ratchet';
 import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Contact } from '../src/home';
 import { MAX_PER_IP, RELAY_AUTH, startRelay } from '../src/relay';
@@ -130,32 +131,61 @@ const alive = (pid: number | null) => {
   }
 };
 
+const fails = (fn: () => unknown) => {
+  try {
+    fn();
+    return false;
+  } catch {
+    return true;
+  }
+};
+
 function sealing() {
-  console.log('\n# a message is sealed to the address it is for');
+  console.log('\n# a conversation is sealed between its two ends');
   const [ann, ben, cat] = [newIdentity('Ann'), newIdentity('Ben'), newIdentity('Cat')];
+  const [annAddr, benAddr] = [addressOf(ann.publicKey), addressOf(ben.publicKey)];
+  const start = () => {
+    const o = offer(ann, benAddr);
+    const b = answer(ben, annAddr, o.hello);
+    return { a: finish(o.hello, o.pair, annAddr, b.reply), b: b.ratchet, o, reply: b.reply };
+  };
+  const { a, b, o, reply } = start();
   const text = 'line one\nline two · ünïcödé 🚀';
-  const sealed = sealTo(ben.publicKey, text);
-  check('the one it is sealed to opens it', openFor(ben, sealed.eph, sealed.box) === text);
-  check('anyone else cannot', (() => {
-    try {
-      openFor(cat, sealed.eph, sealed.box);
-      return false;
-    } catch {
-      return true;
-    }
-  })());
-  const flipped = Buffer.from(sealed.box, 'base64url');
+  check('the one who answered cannot send before it has heard', !canSeal(b) && fails(() => seal(b, 'too early')));
+  const m1 = seal(a, text);
+  check('the other end opens a message', open(b, m1) === text && canSeal(b));
+  check('the same message does not open twice', fails(() => open(b, m1)));
+  const back = seal(b, 'and back');
+  check('it works the other way', open(a, back) === 'and back');
+  const [x, y, z] = [seal(a, 'one'), seal(a, 'two'), seal(a, 'three')];
+  check('messages that arrive out of order all open', open(b, z) === 'three' && open(b, x) === 'one' && open(b, y) === 'two');
+  check('every message has its own key, and each reply brings a new exchange', new Set([m1.h.dh, x.h.dh, back.h.dh]).size === 3 && x.h.dh === y.h.dh && x.c !== seal(a, 'one').c);
+  const flipped = Buffer.from(seal(a, 'intact').c, 'base64url');
   flipped[0] = flipped[0]! ^ 1;
-  check('a changed byte does not open', (() => {
-    try {
-      openFor(ben, sealed.eph, flipped.toString('base64url'));
-      return false;
-    } catch {
-      return true;
-    }
+  const good = seal(a, 'after the bad one');
+  check('a changed byte does not open, and the conversation goes on', fails(() => open(b, { h: { ...good.h, n: good.h.n - 1 }, c: flipped.toString('base64url') })) && open(b, good) === 'after the bad one');
+  check('a changed header does not open', (() => {
+    const m = seal(b, 'header');
+    return fails(() => open(a, { h: { ...m.h, pn: m.h.pn + 1 }, c: m.c })) && open(a, m) === 'header';
   })());
-  const back = sealTo(ann.publicKey, 'and back');
-  check('it works the other way and twice over', openFor(ann, back.eph, back.box) === 'and back' && sealTo(ben.publicKey, text).box !== sealed.box);
+  const other = start();
+  check('a message from another conversation between the same two does not open', fails(() => open(b, seal(other.a, 'elsewhere'))));
+
+  check('an offer is only good for the id it names', checkOffer(o.hello, benAddr) && !checkOffer(o.hello, addressOf(cat.publicKey)));
+  check('an offer signed by another key is refused', !checkOffer({ ...o.hello, key: cat.publicKey }, benAddr));
+  check('an answer signed by another key is refused', fails(() => finish(o.hello, o.pair, annAddr, { ...reply, key: cat.publicKey })));
+  const swapped = answer(cat, annAddr, o.hello).reply;
+  check('an answer with a swapped one-time key is refused', fails(() => finish(o.hello, o.pair, annAddr, { ...reply, e: swapped.e })));
+
+  // What forward secrecy means: the long-term keys alone open nothing.
+  const late = start();
+  const kept = seal(late.a, 'said earlier');
+  open(late.b, kept);
+  const replay = answer(ben, annAddr, late.o.hello);
+  check('the identity keys alone do not open a recorded message', fails(() => open(replay.ratchet, kept)));
+
+  const number = safetyNumber(ann.publicKey, ben.publicKey);
+  check('the safety number is the same from both sides, and changes with either key', /^(\d{5} ){5}\d{5}$/.test(number) && number === safetyNumber(ben.publicKey, ann.publicKey) && number !== safetyNumber(ann.publicKey, cat.publicKey));
 }
 
 const A_ROOT = join(base, 'machine-a');
@@ -168,7 +198,7 @@ async function messaging() {
   const ann = await agent(A_ROOT, 'session-ann', annSock.env);
   const ben = await agent(B_ROOT, 'session-ben', benSock.env);
   const tools = (await ann.client.listTools()).tools.map((t) => t.name).sort();
-  check('the tools are setup, list_agents, send_message and cloud_link', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'list_agents', 'send_message', 'setup']), tools);
+  check('the tools are setup, list_agents, send_message, safety_number and cloud_link', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'list_agents', 'safety_number', 'send_message', 'setup']), tools);
   const told = ann.client.getInstructions() ?? '';
   check('the instructions describe messaging, with no agenda or rules', told.includes('send_message') && !/agenda|propos|never an instruction|authoris/i.test(told), told);
   const early = await ann.tool('send_message', { to: 'abc-def-ghj', message: 'hi' });
@@ -196,11 +226,11 @@ async function messaging() {
   const theirs = await ann.tool('list_agents');
   check('list_agents shows who can be messaged', theirs.text.includes(`"Ben" (${benAddr})`), theirs);
 
-  const log = (root: string, addr: string) =>
-    readFileSync(join(root, 'ids', addr, 'messages.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  const annLog = log(A_ROOT, annAddr);
-  const benLog = log(B_ROOT, benAddr);
-  check('both sides keep a log of what went each way', annLog.filter((e) => e.dir === 'out').length === 2 && annLog.filter((e) => e.dir === 'in').length === 1 && benLog.filter((e) => e.dir === 'in').length === 2 && benLog[0].text === first, [annLog, benLog]);
+  check('neither side writes a message to disk', !existsSync(join(A_ROOT, 'ids', annAddr, 'messages.jsonl')) && !existsSync(join(B_ROOT, 'ids', benAddr, 'messages.jsonl')));
+  const number = await ann.tool('safety_number', { with: 'Ben' });
+  const theirNumber = await ben.tool('safety_number', { with: annAddr });
+  const digits = (t: string) => /(\d{5} ){5}\d{5}/.exec(t)?.[0];
+  check('both sides show the same safety number', !number.failed && digits(number.text) && digits(number.text) === digits(theirNumber.text), [number, theirNumber]);
 
   const big = 'x'.repeat(100_000);
   const large = await ann.tool('send_message', { to: 'Ben', message: big });
@@ -242,41 +272,63 @@ type Pair = Awaited<ReturnType<typeof messaging>>;
 async function forgery(p: Pair) {
   console.log('\n# what a relay or a stranger cannot do');
   const eve = newIdentity('Eve');
+  const eveAddr = addressOf(eve.publicKey);
   const link = await dialRelay(relayUrl, eve);
-  const benKey = readJson<Identity>(join(B_ROOT, 'ids', p.benAddr), 'identity.json').publicKey;
   const annId = readJson<Identity>(join(A_ROOT, 'ids', p.annAddr), 'identity.json');
   const before = p.benSock.arrivals.length;
+  const got: any[] = [];
+  link.ws.addEventListener('message', (ev) => {
+    const m = JSON.parse(String(ev.data));
+    if (m.t === 'recv') got.push(m.payload);
+  });
   const send = (to: string, payload: object) => link.ws.send(JSON.stringify({ t: 'send', to, ref: 'x', payload }));
-  const inner = (name: string, text: string) => JSON.stringify({ id: randomBytes(9).toString('base64url'), name, text, at: new Date().toISOString() });
+  const inner = (text: string) => JSON.stringify({ t: 'msg', id: randomBytes(9).toString('base64url'), name: 'Eve', text, at: new Date().toISOString() });
 
-  const asAnn = sealTo(benKey, inner('Ann', 'from Eve, claiming to be Ann'));
-  send(p.benAddr, { v: 2, kind: 'msg', key: annId.publicKey, ...asAnn, sig: signText(annId, `parley message\n${p.benAddr}\n${asAnn.eph}\n${asAnn.box}`) });
-  const forCat = sealTo(benKey, inner('Eve', 'meant for someone else'));
-  const catKey = readJson<Identity>(join(C_ROOT, 'ids', p.catAddr), 'identity.json').publicKey;
-  const toCat = sealTo(catKey, inner('Eve', 'signed for Ben, sent to Cat'));
-  send(p.catAddr, { v: 2, kind: 'msg', key: eve.publicKey, ...toCat, sig: signText(eve, `parley message\n${p.benAddr}\n${toCat.eph}\n${toCat.box}`) });
-  send(p.benAddr, { v: 2, kind: 'msg', key: eve.publicKey, ...forCat, sig: 'not-a-signature' });
-  await Bun.sleep(800);
-  check('a message under someone else\'s key is dropped', p.benSock.arrivals.length === before, p.benSock.texts().slice(before));
-  const catSaw = await p.cat.tool('list_agents');
-  check('a message signed for another id is dropped', !catSaw.text.includes('signed for Ben'), catSaw);
+  const asAnn = offer(eve, p.benAddr);
+  send(p.benAddr, { v: 3, kind: 'hs1', ...asAnn.hello, key: annId.publicKey });
+  const forCat = offer(eve, p.catAddr);
+  send(p.benAddr, { v: 3, kind: 'hs1', ...forCat.hello });
+  await Bun.sleep(600);
+  check('a handshake under someone else\'s key, or made for another id, gets no answer', !got.some((g) => g.kind === 'hs2'), got);
+  send(p.benAddr, { v: 3, kind: 'm', h: { dh: asAnn.hello.e, pn: 0, n: 0 }, c: 'AAAA' });
+  await until(() => got.find((g) => g.kind === 'reset'), 3000);
+  check('a message outside any conversation is not read', got.some((g) => g.kind === 'reset') && p.benSock.arrivals.length === before);
 
-  const own = sealTo(benKey, inner('Eve', 'hello from Eve'));
-  const frame = { v: 2, kind: 'msg', key: eve.publicKey, ...own, sig: signText(eve, `parley message\n${p.benAddr}\n${own.eph}\n${own.box}`) };
+  const mine = offer(eve, p.benAddr);
+  send(p.benAddr, { v: 3, kind: 'hs1', ...mine.hello });
+  const reply = await until(() => got.find((g) => g.kind === 'hs2'), 3000);
+  const r = finish(mine.hello, mine.pair, eveAddr, reply);
+  const frame = { v: 3, kind: 'm', ...seal(r, inner('hello from Eve')) };
   send(p.benAddr, frame);
   send(p.benAddr, frame);
-  const got = await until(() => p.benSock.texts().filter((t) => t.includes('hello from Eve')).length || undefined, 3000);
-  await Bun.sleep(500);
-  check('a stranger can message by id, and a replayed message arrives once', got === 1 && p.benSock.texts().filter((t) => t.includes('hello from Eve')).length === 1, p.benSock.texts().slice(before));
+  const bad = seal(r, inner('altered on the way'));
+  const raw = Buffer.from(bad.c, 'base64url');
+  raw[3] = raw[3]! ^ 1;
+  send(p.benAddr, { v: 3, kind: 'm', h: bad.h, c: raw.toString('base64url') });
+  send(p.benAddr, { v: 3, kind: 'm', ...seal(r, inner('and one more from Eve')) });
+  await until(() => p.benSock.texts().some((t) => t.includes('and one more from Eve')) || undefined, 3000);
+  await Bun.sleep(400);
+  const fromEve = p.benSock.texts().slice(before);
+  check('a stranger can message by id, and a replayed message arrives once', fromEve.filter((t) => t.includes('hello from Eve')).length === 1, fromEve);
+  check('a message altered on the way is dropped, and the next one still arrives', !fromEve.some((t) => t.includes('altered on the way')) && fromEve.some((t) => t.includes('and one more from Eve')), fromEve);
   link.ws.close();
 
   const contacts = readJson<Record<string, Contact>>(B_ROOT, 'contacts.json');
-  writeJson(B_ROOT, 'contacts.json', { ...contacts, [p.annAddr]: { ...contacts[p.annAddr]!, key: newIdentity('Other').publicKey } });
-  const count = p.benSock.arrivals.length;
-  void p.ann.tool('send_message', { to: 'Ben', message: 'from a key Ben does not know for me' });
-  await Bun.sleep(1500);
-  check('a known id that turns up with another key is not believed', p.benSock.arrivals.length === count);
+  writeJson(B_ROOT, 'contacts.json', { ...contacts, [eveAddr]: { ...contacts[eveAddr]!, key: newIdentity('Other').publicKey } });
+  const again = await dialRelay(relayUrl, eve);
+  const heard: any[] = [];
+  again.ws.addEventListener('message', (ev) => {
+    const m = JSON.parse(String(ev.data));
+    if (m.t === 'recv') heard.push(m.payload);
+  });
+  const hello = () => again.ws.send(JSON.stringify({ t: 'send', to: p.benAddr, ref: 'x', payload: { v: 3, kind: 'hs1', ...offer(eve, p.benAddr).hello } }));
+  hello();
+  await Bun.sleep(800);
+  const refused = !heard.some((g) => g.kind === 'hs2');
   writeJson(B_ROOT, 'contacts.json', contacts);
+  hello();
+  check('a known id that turns up with another key is not answered', refused && (await until(() => heard.find((g) => g.kind === 'hs2'), 3000)), heard);
+  again.ws.close();
 }
 
 async function names(p: Pair) {
@@ -588,6 +640,35 @@ async function accountRelays() {
   }
 }
 
+async function conversations() {
+  console.log('\n-- conversations that start, restart and collide');
+  const [fayRoot, gusRoot] = [mkdtempSync(join(base, 'fay-')), mkdtempSync(join(base, 'gus-'))];
+  const [faySock, gusSock] = [fakeSession(), fakeSession()];
+  const fay = await agent(fayRoot, 'session-fay', faySock.env);
+  let gus = await agent(gusRoot, 'session-gus', gusSock.env);
+  const fayAddr = addressIn((await fay.tool('setup', { name: 'Fay' })).text);
+  const gusAddr = addressIn((await gus.tool('setup', { name: 'Gus' })).text);
+  const [toGus, toFay] = await Promise.all([
+    fay.tool('send_message', { to: gusAddr, message: 'first from Fay' }),
+    gus.tool('send_message', { to: fayAddr, message: 'first from Gus' }),
+  ]);
+  check('two sessions that write to each other at the same moment both get through', !toGus.failed && !toFay.failed && gusSock.texts().some((t) => t.includes('first from Fay')) && faySock.texts().some((t) => t.includes('first from Gus')), [toGus, toFay]);
+  const burst = await Promise.all([1, 2, 3, 4, 5].map((n) => fay.tool('send_message', { to: 'Gus', message: `burst ${n}` })));
+  check('several messages sent at once all arrive', burst.every((r) => !r.failed) && [1, 2, 3, 4, 5].every((n) => gusSock.texts().some((t) => t.includes(`burst ${n}`))), burst);
+
+  await gus.close();
+  gus = await agent(gusRoot, 'session-gus', gusSock.env);
+  await eventually(async () => ((await gus.tool('list_agents')).text.includes('Connected to the relay.') ? true : undefined));
+  const after = await fay.tool('send_message', { to: 'Gus', message: 'after you restarted' });
+  check('a session that restarted lost the conversation keys, and the next message starts over by itself', !after.failed && gusSock.texts().some((t) => t.includes('after you restarted')), after);
+  await gus.close();
+  gus = await agent(gusRoot, 'session-gus', gusSock.env);
+  await eventually(async () => ((await gus.tool('list_agents')).text.includes('Connected to the relay.') ? true : undefined));
+  const fromNew = await gus.tool('send_message', { to: 'Fay', message: 'from the restarted side' });
+  const onward = await fay.tool('send_message', { to: 'Gus', message: 'and onward' });
+  check('and so does one from the side that restarted', !fromNew.failed && !onward.failed && faySock.texts().some((t) => t.includes('from the restarted side')) && gusSock.texts().some((t) => t.includes('and onward')), [fromNew, onward]);
+}
+
 async function twoRelays() {
   console.log('\n-- two relays behind one address');
   const free = () => {
@@ -721,6 +802,7 @@ try {
   await linkedMachine();
   await sessionsHere();
   await twoRelays();
+  await conversations();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.stack : err);

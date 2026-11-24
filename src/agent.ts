@@ -1,11 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import { startAccount, type AccountState, type Verified } from './account';
 import { readAttestation } from './attest';
-import { addressOf, openFor, sealTo, signText, verifyText } from './crypto';
+import { addressOf, signText } from './crypto';
 import { isSavedKey, loadConfig, loadContacts, loadIdentity, readJson, saveContact } from './home';
+import { answer, canSeal, checkOffer, finish, offer, open, safetyNumber, seal, type Ratchet } from './ratchet';
 import { RELAY_AUTH } from './relay';
 import { TEXT_MAX } from './types';
 
@@ -30,6 +31,20 @@ export type AgentState = {
 };
 
 class Offline extends Error {}
+// The other side no longer has this conversation's keys; a new handshake fixes it.
+class Stale extends Error {}
+
+type Hello = { key: string; e: string; sig: string };
+
+// One conversation with one other session. `ready` settles once this side can seal.
+type Conv = {
+  ratchet?: Ratchet;
+  key?: string;
+  offered?: ReturnType<typeof offer>;
+  ready: Promise<void>;
+  resolve: () => void;
+  reject: (e: Error) => void;
+};
 
 const explain = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -85,9 +100,8 @@ export async function startAgent(
   let lastProbe = 0;
   let firstAnswer = () => {};
   const answered = new Promise<void>((resolve) => (firstAnswer = resolve));
-  const keys = new Map<string, string>();
-  const keyWaits = new Map<string, Array<{ resolve: (key: string) => void; reject: (e: Error) => void }>>();
-  const acks = new Map<string, { to: string; key: string; resolve: (name: string) => void; reject: (e: Error) => void }>();
+  const convs = new Map<string, Conv>();
+  const acks = new Map<string, { to: string; resolve: (name: string) => void; reject: (e: Error) => void }>();
   const seen = new Set<string>();
 
   const account = startAccount(home, me, log, (att) => {
@@ -97,12 +111,6 @@ export async function startAgent(
       connectRelay();
     }
   });
-
-  const keyOf = (to: string) => loadContacts()[to]?.key ?? keys.get(to);
-
-  function record(entry: object) {
-    appendFileSync(join(home, 'messages.jsonl'), JSON.stringify(entry) + '\n');
-  }
 
   // A proof this side cannot check (no issuer of its own, or a bad one) is
   // shown as no proof at all.
@@ -182,14 +190,39 @@ export async function startAgent(
     socket.send(frame);
   }
 
+  function newConv(): Conv {
+    let resolve = () => {};
+    let reject = (_: Error) => {};
+    const ready = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    ready.catch(() => {});
+    return { ready, resolve, reject };
+  }
+
+  function drop(from: string, err: Error) {
+    const conv = convs.get(from);
+    convs.delete(from);
+    conv?.reject(err);
+    for (const [id, wait] of acks) {
+      if (wait.to !== from) continue;
+      acks.delete(id);
+      wait.reject(err);
+    }
+  }
+
+  // Conversations outlive a reconnect: their keys are in memory on both
+  // sides. Only what was waiting on an answer fails.
   function failAll(err: Error) {
     for (const [id, wait] of acks) {
       acks.delete(id);
       wait.reject(err);
     }
-    for (const [to, waits] of keyWaits) {
-      keyWaits.delete(to);
-      for (const w of waits) w.reject(err);
+    for (const [to, conv] of convs) {
+      if (conv.ratchet && canSeal(conv.ratchet)) continue;
+      convs.delete(to);
+      conv.reject(err);
     }
   }
 
@@ -219,86 +252,120 @@ export async function startAgent(
     } else if (msg.t === 'undeliverable') {
       const ref = String(msg.ref ?? '');
       if (ref.startsWith('probe:')) return replaceRelay('the relay no longer knows this connection');
-      const offline = new Offline('not online');
-      if (ref.startsWith('key:')) {
-        const waits = keyWaits.get(msg.to) ?? [];
-        keyWaits.delete(msg.to);
-        for (const w of waits) w.reject(offline);
-      } else if (ref.startsWith('msg:')) {
-        const wait = acks.get(ref.slice(4));
-        acks.delete(ref.slice(4));
-        wait?.reject(offline);
+      if (ref.startsWith('hs:') || ref.startsWith('msg:')) drop(String(msg.to), new Offline('not online'));
+    }
+  }
+
+  // The key a side shows has to be the one its id stands for, and the one
+  // this machine heard from that id before.
+  function knownKey(from: string, key: unknown): key is string {
+    if (typeof key !== 'string' || addressOf(key) !== from) return false;
+    if (isSavedKey(from, key)) return true;
+    log(`${from} showed a different key than this id had before, so it is not answered`);
+    return false;
+  }
+
+  function onPeer(from: string, p: any) {
+    if (p?.v !== 3) return;
+    const conv = convs.get(from);
+    if (p.kind === 'hs1') {
+      if (!knownKey(from, p.key) || !checkOffer(p as Hello, address)) return;
+      // Both sides started at once: the lower id's handshake is the one kept.
+      if (conv?.offered && address < from) return;
+      const made = answer(me, from, p as Hello);
+      const next = conv?.offered ? conv : newConv();
+      if (conv && next !== conv) drop(from, new Stale('the other side started the conversation again'));
+      next.offered = undefined;
+      next.ratchet = made.ratchet;
+      next.key = p.key;
+      convs.set(from, next);
+      relaySend(from, 'hs2', { v: 3, kind: 'hs2', ...made.reply });
+    } else if (p.kind === 'hs2') {
+      if (!conv?.offered || !knownKey(from, p.key)) return;
+      try {
+        conv.ratchet = finish(conv.offered.hello, conv.offered.pair, address, p as Hello);
+      } catch (err) {
+        return drop(from, err instanceof Error ? err : new Error(String(err)));
+      }
+      conv.key = p.key;
+      conv.offered = undefined;
+      conv.resolve();
+    } else if (p.kind === 'reset') {
+      if (conv) drop(from, new Stale('the other side lost the conversation'));
+    } else if (p.kind === 'm') {
+      if (!conv?.ratchet || !conv.key) return relaySend(from, 'reset', { v: 3, kind: 'reset' });
+      let inner: any;
+      try {
+        inner = JSON.parse(open(conv.ratchet, p));
+      } catch (err) {
+        return log(`a message from ${from} was dropped:`, explain(err));
+      }
+      conv.resolve();
+      if (inner.t === 'ack') {
+        const wait = acks.get(String(inner.id));
+        if (!wait || wait.to !== from) return;
+        acks.delete(String(inner.id));
+        saveContact(from, String(inner.name), conv.key);
+        wait.resolve(String(inner.name));
+      } else if (inner.t === 'msg') {
+        void receive(from, conv, inner).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
       }
     }
   }
 
-  function onPeer(from: string, p: any) {
-    if (p?.v !== 2 || typeof p.key !== 'string' || addressOf(p.key) !== from) return;
-    if (p.kind === 'key?') {
-      relaySend(from, 'key-reply', { v: 2, kind: 'key', key: me.publicKey });
-    } else if (p.kind === 'key') {
-      keys.set(from, p.key);
-      const waits = keyWaits.get(from) ?? [];
-      keyWaits.delete(from);
-      for (const w of waits) w.resolve(p.key);
-    } else if (p.kind === 'ack') {
-      const wait = acks.get(String(p.id));
-      // Only the key the message was sealed to can say it arrived.
-      if (!wait || wait.to !== from || wait.key !== p.key) return;
-      if (!verifyText(p.key, `parley ack\n${address}\n${p.id}\n${p.name}`, String(p.sig))) return;
-      acks.delete(String(p.id));
-      saveContact(from, String(p.name), p.key);
-      wait.resolve(String(p.name));
-    } else if (p.kind === 'msg') {
-      void receive(from, p).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
-    }
-  }
-
-  async function receive(from: string, p: any) {
-    if (!isSavedKey(from, p.key)) throw new Error('it is signed by a different key than this id had before');
-    if (!verifyText(p.key, `parley message\n${address}\n${p.eph}\n${p.box}`, String(p.sig))) {
-      throw new Error('the signature does not check out');
-    }
-    const inner = JSON.parse(openFor(me, String(p.eph), String(p.box)));
+  async function receive(from: string, conv: Conv, inner: any) {
+    const key = conv.key as string;
     const id = String(inner.id);
     const name = String(inner.name);
     if (!seen.has(id)) {
       seen.add(id);
-      const verified = verify(inner.att, p.key, from);
-      saveContact(from, name, p.key);
-      const m: Incoming = { id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at) };
-      record({ dir: 'in', ...m });
-      await onMessage(m);
+      const verified = verify(inner.att, key, from);
+      saveContact(from, name, key);
+      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at) });
     }
-    relaySend(from, `ack:${id}`, {
-      v: 2,
-      kind: 'ack',
-      key: me.publicKey,
-      id,
-      name: me.name,
-      sig: signText(me, `parley ack\n${from}\n${id}\n${me.name}`),
-    });
+    if (convs.get(from) !== conv || !conv.ratchet) return;
+    relaySend(from, `ack:${id}`, { v: 3, kind: 'm', ...seal(conv.ratchet, JSON.stringify({ t: 'ack', id, name: me.name })) });
   }
 
-  function askKey(to: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const waits = keyWaits.get(to) ?? [];
-      waits.push({ resolve, reject });
-      keyWaits.set(to, waits);
-      if (waits.length === 1) {
-        try {
-          relaySend(to, `key:${to}`, { v: 2, kind: 'key?', key: me.publicKey });
-        } catch (err) {
-          keyWaits.delete(to);
-          return reject(err);
-        }
+  // The conversation with `to`, ready to seal. Starts one if there is none.
+  async function converse(to: string): Promise<Conv> {
+    let conv = convs.get(to);
+    if (!conv) {
+      conv = newConv();
+      conv.offered = offer(me, to);
+      convs.set(to, conv);
+      const mine = conv;
+      try {
+        relaySend(to, `hs:${to}`, { v: 3, kind: 'hs1', ...conv.offered.hello });
+      } catch (err) {
+        convs.delete(to);
+        throw err;
       }
       setTimeout(() => {
-        const left = keyWaits.get(to);
-        if (!left?.length) return;
-        keyWaits.delete(to);
-        for (const w of left) w.reject(new Error(`${to} did not answer`));
+        if (convs.get(to) === mine && !(mine.ratchet && canSeal(mine.ratchet))) {
+          drop(to, new Error(`${to} did not answer. It may be on a parley older than 0.9`));
+        }
       }, ANSWER_MS);
+    }
+    await conv.ready;
+    return conv;
+  }
+
+  async function sendOnce(to: string, text: string): Promise<string> {
+    const conv = await converse(to);
+    const id = randomBytes(9).toString('base64url');
+    const sealed = seal(conv.ratchet as Ratchet, JSON.stringify({ t: 'msg', id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
+    return new Promise<string>((resolve, reject) => {
+      acks.set(id, { to, resolve, reject });
+      setTimeout(() => {
+        if (acks.delete(id)) reject(new Error(`${to} did not confirm it got the message`));
+      }, ANSWER_MS);
+      try {
+        relaySend(to, `msg:${id}`, { v: 3, kind: 'm', ...sealed });
+      } catch (err) {
+        acks.delete(id);
+        reject(err);
+      }
     });
   }
 
@@ -320,30 +387,22 @@ export async function startAgent(
       if (text.length > TEXT_MAX) throw new Error(`a message is at most ${TEXT_MAX} characters`);
       if (to === address) throw new Error("that is this session's own id");
       try {
-        const key = keyOf(to) ?? (await askKey(to));
-        const id = randomBytes(9).toString('base64url');
-        const at = new Date().toISOString();
-        const { eph, box } = sealTo(key, JSON.stringify({ id, name: me.name, text, at, att: account.att() }));
-        const name = await new Promise<string>((resolve, reject) => {
-          acks.set(id, { to, key, resolve, reject });
-          setTimeout(() => {
-            if (acks.delete(id)) reject(new Error(`${to} did not confirm it got the message`));
-          }, ANSWER_MS);
-          try {
-            relaySend(to, `msg:${id}`, { v: 2, kind: 'msg', key: me.publicKey, eph, box, sig: signText(me, `parley message\n${to}\n${eph}\n${box}`) });
-          } catch (err) {
-            acks.delete(id);
-            reject(err);
-          }
+        return await sendOnce(to, text).catch((err) => {
+          if (err instanceof Stale) return sendOnce(to, text);
+          throw err;
         });
-        record({ dir: 'out', id, to: { name, address: to }, text, at });
-        return name;
       } catch (err) {
         if (err instanceof Offline && err.message === 'not online') {
           throw new Error(`${to} is not online: no Claude Code session with that parley name is open right now`);
         }
         throw err;
       }
+    },
+    // Needs the other side's key, which is saved once a message has been exchanged.
+    safetyNumber(to: string): string {
+      const theirs = loadContacts()[to]?.key;
+      if (!theirs) throw new Error(`no message has been exchanged with ${to} yet, so there is no key of theirs to compare`);
+      return safetyNumber(me.publicKey, theirs);
     },
     close() {
       closed = true;
