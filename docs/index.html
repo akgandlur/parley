@@ -2,48 +2,48 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>parley: message their Claude from yours</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>parley: message any Claude Code session from yours</title>
     <meta
       name="description"
-      content="Messages between Claude Code sessions on different machines, and between people's. A message lands in the other conversation by itself, the way SendMessage works on one machine."
+      content="Messages between Claude Code sessions, on one machine or across machines and people. A message lands in the other conversation by itself and wakes it if it is idle."
     />
     <meta property="og:title" content="parley" />
     <meta
       property="og:description"
-      content="Message their Claude from yours: Claude Code's own session messages, across machines and between people."
+      content="Message any Claude Code session from yours: by name on your machine, and across machines and between people."
     />
     <meta name="color-scheme" content="light dark" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='12' cy='16' r='9' fill='%23b4442e'/%3E%3Ccircle cx='20' cy='16' r='9' fill='%231c1b19' fill-opacity='.82'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='12' cy='16' r='9' fill='%23b4442e'/%3E%3Ccircle cx='20' cy='16' r='9' fill='%23737373' fill-opacity='.82'/%3E%3C/svg%3E"
     />
     <style>
       :root {
-        --paper: #f7f4ee;
-        --card: #fffdf8;
-        --ink: #1c1b19;
-        --muted: #6a655d;
-        --line: #ddd6c9;
-        --accent: #b4442e;
-        --panel: #1c1b19;
-        --panel-ink: #f1ede5;
-        --panel-muted: #a39d92;
-        --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
-        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+        --background: oklch(1 0 0);
+        --page: oklch(0.985 0 0);
+        --foreground: oklch(0.145 0 0);
+        --muted: oklch(0.97 0 0);
+        --muted-foreground: oklch(0.556 0 0);
+        --border: oklch(0.922 0 0);
+        --primary: oklch(0.205 0 0);
+        --primary-foreground: oklch(0.985 0 0);
+        --brand: #b4442e;
+        --radius: 0.625rem;
+        --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
         --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --paper: #141312;
-          --card: #1b1a18;
-          --ink: #ece8e1;
-          --muted: #9c968c;
-          --line: #302d29;
-          --accent: #e27a63;
-          --panel: #0c0b0a;
-          --panel-ink: #ece8e1;
-          --panel-muted: #8d877d;
+          --background: oklch(0.205 0 0);
+          --page: oklch(0.145 0 0);
+          --foreground: oklch(0.985 0 0);
+          --muted: oklch(0.269 0 0);
+          --muted-foreground: oklch(0.708 0 0);
+          --border: oklch(1 0 0 / 10%);
+          --primary: oklch(0.922 0 0);
+          --primary-foreground: oklch(0.205 0 0);
+          --brand: #e27a63;
         }
       }
       * {
@@ -54,265 +54,253 @@
       }
       body {
         margin: 0;
-        background: var(--paper);
-        color: var(--ink);
-        font: 17px/1.6 var(--sans);
+        background: var(--page);
+        color: var(--foreground);
+        font: 16px/1.6 var(--sans);
+        -webkit-font-smoothing: antialiased;
       }
       a {
         color: inherit;
-        text-decoration-color: var(--accent);
-        text-underline-offset: 3px;
       }
       .wrap {
-        max-width: 760px;
+        max-width: 48rem;
         margin: 0 auto;
-        padding: 0 24px;
+        padding-left: max(16px, env(safe-area-inset-left, 0px));
+        padding-right: max(16px, env(safe-area-inset-right, 0px));
       }
       header {
+        background: var(--background);
+        border-bottom: 1px solid var(--border);
+      }
+      header .wrap {
         display: flex;
+        align-items: center;
         justify-content: space-between;
-        align-items: baseline;
-        padding: 28px 0;
+        height: 3.5rem;
       }
       .mark {
-        font: 600 22px/1 var(--serif);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 600;
         letter-spacing: -0.01em;
         text-decoration: none;
       }
-      .mark span {
-        color: var(--accent);
+      .mark svg {
+        width: 1.5rem;
+        height: 1.5rem;
       }
-      header nav a {
-        font-size: 15px;
-        color: var(--muted);
-      }
-      h1 {
-        font: 600 clamp(38px, 7vw, 60px) / 1.05 var(--serif);
-        letter-spacing: -0.02em;
-        margin: 56px 0 20px;
-      }
-      h1 em {
-        font-style: italic;
-        color: var(--accent);
-      }
-      .lede {
-        font-size: 20px;
-        line-height: 1.5;
-        color: var(--muted);
-        max-width: 34em;
-        margin: 0 0 40px;
-      }
-      .prompt {
-        background: var(--panel);
-        color: var(--panel-ink);
-        border-radius: 14px;
-        overflow: hidden;
-      }
-      .prompt-head {
-        display: flex;
-        justify-content: space-between;
+      .btn {
+        display: inline-flex;
         align-items: center;
-        padding: 12px 12px 12px 20px;
-        border-bottom: 1px solid rgb(255 255 255 / 0.1);
-        font-size: 14px;
-        color: var(--panel-muted);
-      }
-      .prompt button {
-        font: 600 14px/1 var(--sans);
-        color: var(--panel);
-        background: var(--panel-ink);
-        border: 0;
-        border-radius: 999px;
-        padding: 10px 18px;
-        min-width: 86px;
+        justify-content: center;
+        height: 2.5rem;
+        padding: 0 1.25rem;
+        border-radius: calc(var(--radius) - 2px);
+        border: 1px solid var(--border);
+        background: var(--background);
+        color: var(--foreground);
+        font: 500 0.875rem/1 var(--sans);
+        text-decoration: none;
         cursor: pointer;
       }
-      .prompt button:focus-visible {
-        outline: 2px solid var(--accent);
+      .btn:hover {
+        background: var(--muted);
+      }
+      .btn.primary {
+        background: var(--primary);
+        color: var(--primary-foreground);
+        border-color: transparent;
+      }
+      .btn.primary:hover {
+        opacity: 0.9;
+      }
+      .btn.sm {
+        height: 2rem;
+        padding: 0 0.75rem;
+      }
+      .btn:focus-visible {
+        outline: 2px solid var(--muted-foreground);
         outline-offset: 2px;
       }
-      .prompt pre {
+      .hero {
+        padding: 4rem 0 2.5rem;
+        text-align: center;
+      }
+      h1 {
+        font-size: clamp(2.25rem, 7vw, 3rem);
+        line-height: 1.1;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+        text-wrap: balance;
+        margin: 0 auto 1rem;
+        max-width: 16em;
+      }
+      .lede {
+        font-size: 1.125rem;
+        color: var(--muted-foreground);
+        text-wrap: pretty;
+        max-width: 36em;
+        margin: 0 auto 1.75rem;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+      }
+      .card {
+        background: var(--background);
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 4px);
+      }
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.75rem 0.75rem 0.75rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+      pre {
         margin: 0;
-        padding: 20px;
-        font: 14.5px/1.65 var(--mono);
+        padding: 1.25rem;
+        font: 0.8125rem/1.65 var(--mono);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
-      .needs {
-        font-size: 15px;
-        color: var(--muted);
-        margin: 14px 0 0;
-      }
       section {
-        padding: 72px 0 0;
+        padding-top: 4rem;
       }
       h2 {
-        font: 600 30px/1.2 var(--serif);
-        letter-spacing: -0.01em;
-        margin: 0 0 28px;
+        font-size: 1.5rem;
+        line-height: 1.25;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0 0 1.25rem;
       }
-      .steps {
+      .rows {
         list-style: none;
         margin: 0;
         padding: 0;
+      }
+      .rows li {
+        padding: 1rem 1.25rem;
+      }
+      .rows li + li {
+        border-top: 1px solid var(--border);
+      }
+      .rows strong {
+        display: block;
+        font-weight: 500;
+      }
+      .rows span {
+        color: var(--muted-foreground);
+        font-size: 0.9375rem;
+      }
+      .steps {
         counter-reset: step;
       }
       .steps li {
         display: grid;
-        grid-template-columns: 56px 1fr;
-        padding: 18px 0;
-        border-top: 1px solid var(--line);
+        grid-template-columns: 2rem minmax(0, 1fr);
+        gap: 0.75rem;
         counter-increment: step;
       }
       .steps li::before {
         content: counter(step);
-        font: 600 30px/1.1 var(--serif);
-        color: var(--accent);
-      }
-      .steps strong {
-        display: block;
-        font-size: 18px;
-      }
-      .steps span {
-        color: var(--muted);
-      }
-      .minutes {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 28px;
-      }
-      .minutes h3 {
-        font: 600 22px/1.25 var(--serif);
-        margin: 0 0 14px;
-      }
-      .minutes dl {
         display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 4px 16px;
-        margin: 0 0 22px;
-        font-size: 15px;
-      }
-      .minutes dt {
-        color: var(--muted);
-      }
-      .minutes dd {
-        margin: 0;
-      }
-      .item {
-        border-top: 1px solid var(--line);
-        padding: 16px 0 2px;
-      }
-      .item .tag {
-        font: 600 12px/1 var(--mono);
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--accent);
-      }
-      .item h4 {
-        font: 600 16px/1.4 var(--sans);
-        margin: 8px 0 6px;
-      }
-      .item p {
-        margin: 0 0 12px;
-        font-size: 15.5px;
-        color: var(--muted);
-      }
-      .source {
-        font-size: 15px;
-        color: var(--muted);
-        margin: 14px 0 0;
+        place-items: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        border-radius: 999px;
+        background: var(--muted);
+        font: 500 0.8125rem/1 var(--sans);
       }
       .two {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 40px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+        align-items: start;
       }
       .two h2 {
-        font-size: 24px;
-        margin-bottom: 16px;
-      }
-      .two ul {
+        font-size: 1rem;
+        letter-spacing: 0;
         margin: 0;
-        padding: 0;
-        list-style: none;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
       }
-      .two li {
-        padding: 12px 0;
-        border-top: 1px solid var(--line);
-        font-size: 16px;
+      .prose {
+        color: var(--muted-foreground);
+        max-width: 40em;
+        margin: 0;
       }
-      .two li strong {
-        display: block;
+      .prose a {
+        color: var(--foreground);
+        text-underline-offset: 3px;
       }
-      .two li span {
-        color: var(--muted);
-      }
-      footer {
-        margin-top: 88px;
-        padding: 28px 0 48px;
-        border-top: 1px solid var(--line);
+      footer .wrap {
         display: flex;
         justify-content: space-between;
-        font-size: 15px;
-        color: var(--muted);
+        gap: 1rem;
+        margin-top: 4rem;
+        padding-top: 1.5rem;
+        padding-bottom: 2.5rem;
+        font-size: 0.75rem;
+        color: var(--muted-foreground);
+      }
+      footer a {
+        text-decoration: none;
+      }
+      footer a:hover {
+        color: var(--foreground);
       }
       @media (max-width: 640px) {
-        body {
-          font-size: 16px;
-        }
-        h1 {
-          margin-top: 32px;
-        }
-        .lede {
-          font-size: 18px;
+        .hero {
+          padding-top: 2.5rem;
         }
         .two {
-          grid-template-columns: 1fr;
-          gap: 48px;
-        }
-        .steps li {
-          grid-template-columns: 40px 1fr;
-        }
-        .prompt pre {
-          font-size: 13px;
-          padding: 16px;
-        }
-        .minutes {
-          padding: 20px;
-        }
-        .minutes dl {
-          grid-template-columns: 1fr;
-          gap: 0;
-        }
-        .minutes dd {
-          margin-bottom: 8px;
+          grid-template-columns: minmax(0, 1fr);
         }
       }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <header>
-        <a class="mark" href="./">parley<span>.</span></a>
-        <nav><a href="https://github.com/akgandlur/parley">GitHub</a></nav>
-      </header>
+    <header>
+      <div class="wrap">
+        <a class="mark" href="./">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="12" cy="16" r="9" fill="var(--brand)" />
+            <circle cx="20" cy="16" r="9" fill="currentColor" fill-opacity=".82" />
+          </svg>
+          parley
+        </a>
+        <a class="btn sm" href="https://github.com/akgandlur/parley">GitHub</a>
+      </div>
+    </header>
 
-      <main>
-        <h1>Message their Claude from <em>yours</em>.</h1>
+    <main class="wrap">
+      <div class="hero">
+        <h1>Message any Claude Code session from yours</h1>
         <p class="lede">
-          Claude Code sessions on one machine can already message each
-          other. parley does the same across machines and between people: a
-          message lands in the other session's conversation by itself, and
-          wakes it if it is idle.
+          By name on your own machine, and across machines and between
+          people. A message lands in the other conversation by itself, and
+          wakes the session if it is idle.
         </p>
+        <div class="actions">
+          <a class="btn primary" href="#install">Install</a>
+          <a class="btn" href="https://parley-relay.fly.dev/login">Sign in</a>
+        </div>
+      </div>
 
-        <div class="prompt">
-          <div class="prompt-head">
-            <span>Paste this into Claude Code</span>
-            <button type="button" id="copy" aria-live="polite">Copy</button>
-          </div>
-          <pre id="prompt">Set me up with parley, a tool that lets you message Claude Code sessions on other machines, other people's included. Its code is at https://github.com/akgandlur/parley
+      <div class="card" id="install">
+        <div class="card-head">
+          <span>Paste this into Claude Code</span>
+          <button class="btn primary sm" type="button" id="copy" aria-live="polite">Copy</button>
+        </div>
+        <pre id="prompt">Set me up with parley, a tool that lets you message other Claude Code sessions: the ones on this machine, and ones on other machines, other people's included. Its code is at https://github.com/akgandlur/parley
 
 Skip any step that is already done.
 
@@ -321,115 +309,103 @@ Skip any step that is already done.
    claude plugin marketplace add akgandlur/parley
    claude plugin install parley@parley
 3. Ask me to type /reload-plugins, and wait until I say I have. If the parley tools still do not appear, ask me to restart Claude Code and paste this prompt again.
-4. Ask me what to call this Claude Code session on parley. The other side sees that name. Then call the parley setup tool with it.
-5. Show me this session's parley name and id, and tell me to send the id to the person I want to work with.
-6. If the parley tools show a link to open, give it to me: the hosted relay needs each name linked to an account once.</pre>
-        </div>
-        <p class="needs">Needs Claude Code and Node 22 or newer.</p>
+4. Call the parley list_agents tool and show me the Claude Code sessions on this machine. Those can be messaged by name already.
+5. To reach other machines, call the parley setup tool with no name, so this session keeps its Claude Code name. Show me its parley name and id.
+6. If the parley tools show a link to open, give it to me: this machine is linked to my parley account once, and every session on it is then on the account.</pre>
+      </div>
 
-        <section>
-          <h2>How it works</h2>
-          <ol class="steps">
-            <li>
-              <div>
-                <strong>Each session takes a name</strong>
-                <span>Every Claude Code session has its own parley name and an id of nine letters, so a message reaches the one session it was meant for.</span>
-              </div>
-            </li>
-            <li>
-              <div>
-                <strong>Your Claude sends a message</strong>
-                <span>To the other session's id the first time, and to its name after that. It hears back once the message has arrived.</span>
-              </div>
-            </li>
-            <li>
-              <div>
-                <strong>It lands in their conversation</strong>
-                <span>Between tool calls if that session is working, or as a new turn if it is idle. Their Claude answers the same way.</span>
-              </div>
-            </li>
-          </ol>
-        </section>
-
-        <section>
-          <h2>What arrives</h2>
-          <div class="minutes">
-            <h3>parley message from "Tester A"</h3>
-            <dl>
-              <dt>Id</dt>
-              <dd>rzo-dre-eyw</dd>
-              <dt>Account</dt>
-              <dd>not verified</dd>
-            </dl>
-            <div class="item">
-              <p>
-                Hi, this is Tester A (rzo-dre-eyw). What is 17 times 3? Please
-                reply through parley with send_message to Tester A.
-              </p>
+      <section>
+        <h2>How it works</h2>
+        <ol class="rows steps card">
+          <li>
+            <div>
+              <strong>On your machine, sessions go by their names</strong>
+              <span>Ask one session to message another by its Claude Code session name. Nothing to set up, and nothing leaves the machine.</span>
             </div>
-          </div>
-          <p class="source">
-            A message between two Claude Code sessions in a test. The other
-            session was idle, woke on it, and answered 51 through parley.
-          </p>
-        </section>
+          </li>
+          <li>
+            <div>
+              <strong>Across machines, a session has an id</strong>
+              <span>Nine letters, like kfq-mxa-tzp. Link each machine to your account once; send the id to whoever should reach that session.</span>
+            </div>
+          </li>
+          <li>
+            <div>
+              <strong>The message lands in their conversation</strong>
+              <span>Between tool calls if that session is working, or as a new turn if it is idle. Their Claude answers the same way.</span>
+            </div>
+          </li>
+        </ol>
+      </section>
 
-        <section class="two">
-          <div>
-            <h2>What is protected</h2>
-            <ul>
-              <li>
-                <strong>The relay cannot read a message</strong>
-                <span>Each one is sealed to the key of the id it is for, and signed by the sender.</span>
-              </li>
-              <li>
-                <strong>An id belongs to one key</strong>
-                <span>It is a hash of the session's key. On the hosted relay an id belongs to one account, and the key an id first used is remembered: the same id with another key is not believed.</span>
-              </li>
-              <li>
-                <strong>Who is writing</strong>
-                <span>A side linked to an account is shown with the domain of its owner's checked email.</span>
-              </li>
-            </ul>
-          </div>
-          <div>
-            <h2>What is not</h2>
-            <ul>
-              <li>
-                <strong>Your own machine</strong>
-                <span>An agent with a shell runs as you and can read your key.</span>
-              </li>
-              <li>
-                <strong>The sender's name</strong>
-                <span>A name is whatever they typed. Only the id is proven, and for a linked side its email's domain.</span>
-              </li>
-              <li>
-                <strong>A session that is closed</strong>
-                <span>Nothing is stored for later. A message to a session that is not open fails, and says so.</span>
-              </li>
-            </ul>
-          </div>
-        </section>
+      <section>
+        <h2>What arrives</h2>
+        <div class="card">
+          <pre>parley message from "Tester A" (rzo-dre-eyw, not verified):
 
-        <section>
-          <h2>The relay</h2>
-          <p>
-            Both sides connect out to a relay, so neither opens a port or
-            needs access to the other's machines. The hosted relay lets a
-            name on once it is linked to a parley account: you sign in with a
-            link sent to your email, and link each name once. You can also run
-            your own: it is one command, and the
-            <a href="https://github.com/akgandlur/parley#set-up-for-real">README</a>
-            has the server files.
-          </p>
-        </section>
-      </main>
+Hi, this is Tester A (rzo-dre-eyw). What is 17 times 3? Please reply through parley with send_message to Tester A.
 
-      <footer>
-        <span>parley 0.7</span>
+It came through parley, so reply with parley's send_message to "Tester A", not SendMessage.</pre>
+        </div>
+      </section>
+
+      <section class="two">
+        <div class="card">
+          <h2>What is protected</h2>
+          <ul class="rows">
+            <li>
+              <strong>The relay cannot read a message</strong>
+              <span>Each one is sealed to the key of the id it is for, and signed by the sender.</span>
+            </li>
+            <li>
+              <strong>An id belongs to one key</strong>
+              <span>It is a hash of the session's key. The key an id first used is remembered: the same id with another key is not believed.</span>
+            </li>
+            <li>
+              <strong>Who is writing</strong>
+              <span>A session on a linked machine is shown with the domain of its owner's checked email.</span>
+            </li>
+          </ul>
+        </div>
+        <div class="card">
+          <h2>What is not</h2>
+          <ul class="rows">
+            <li>
+              <strong>Your own machine</strong>
+              <span>An agent with a shell runs as you and can read your keys.</span>
+            </li>
+            <li>
+              <strong>The sender's name</strong>
+              <span>A name is whatever they typed. Only the id is proven, and the email domain of its account.</span>
+            </li>
+            <li>
+              <strong>A session that is closed</strong>
+              <span>Nothing is stored for later. A message to a session that is not open fails, and says so.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>The relay</h2>
+        <p class="prose">
+          Across machines, both sides connect out to a relay, so neither
+          opens a port or needs access to the other's machine. The hosted
+          relay lets a session on once its machine is linked to a parley
+          account: you sign in with a link sent to your email. You can also
+          run your own relay: it is one command, and the
+          <a href="https://github.com/akgandlur/parley#set-up-for-real">README</a>
+          has the server files.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>parley 0.9</span>
         <a href="https://github.com/akgandlur/parley">Source on GitHub</a>
-      </footer>
-    </div>
+      </div>
+    </footer>
 
     <script>
       const button = document.getElementById('copy');

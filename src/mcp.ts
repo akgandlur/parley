@@ -24,7 +24,7 @@ const INSTRUCTIONS = `parley lets this Claude Code session message any Claude Co
 
 A session on this machine is reached by its Claude Code session name, with no setup. To be reachable from other machines, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone elsewhere to reach this session. send_message sends to a session name, an id, or a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
-The hosted relay lets a name on once it is linked to a parley account, once per name. When list_agents shows a link, give it to your user to open while signed in.`;
+The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.`;
 
 const log = (...parts: unknown[]) => console.error(new Date().toISOString(), 'parley:', ...parts);
 
@@ -166,7 +166,7 @@ export async function runMcp() {
     'list_agents',
     {
       description:
-        "Show the names you can message: the Claude Code sessions on this machine, other parley names here, and everyone you have exchanged a message with. Also shows this session's parley name and id and whether it is connected. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then.",
+        "Show the names you can message: the Claude Code sessions on this machine, other parley names here, and everyone you have exchanged a message with. Also shows this session's parley name and id and whether it is connected. If this machine is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses its sessions until then.",
     },
     () =>
       reply(async () => {
@@ -183,7 +183,7 @@ export async function runMcp() {
         ];
         if (s.account.link) {
           lines.push(
-            `This name is not linked to a parley account yet, so the relay will not let it on. Ask your user to open this link while signed in to ${s.account.url}; it works for 15 minutes:`,
+            `This machine is not linked to a parley account yet, so the relay will not let its sessions on. Ask your user to open this link while signed in to ${s.account.url}; it works for 15 minutes, and is needed once per machine:`,
             s.account.link,
           );
         } else if (s.account.error) {
@@ -228,13 +228,13 @@ export async function runMcp() {
     'cloud_link',
     {
       description:
-        "Tie this session's parley name to your user's parley account. The hosted relay needs this before the name can connect, and it is done once per name. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",
+        "Tie this machine to your user's parley account. The hosted relay needs this before a session here can connect, and it is done once per machine: every session on it is then on the account. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",
       inputSchema: { url: z.string().max(500).optional().describe('The cloud address, if your user gave one') },
     },
     ({ url }) =>
       named(async (a) => {
         const made = a.account.link(url ?? process.env.PARLEY_CLOUD);
-        return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the name is linked:\n${made.link}`;
+        return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the machine is linked:\n${made.link}`;
       }),
   );
 

@@ -3,7 +3,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { readAttestation } from './attest';
 import { signText, type Identity } from './crypto';
-import { readJson, writeJson } from './home';
+import { machineIdentity, readJson, writeJson } from './home';
 
 // A name linked to a parley account gets from the cloud the proof that lets
 // it onto a relay that needs one, and shows the other side its account's
@@ -28,16 +28,18 @@ const originOf = (url: string) => {
   return parsed.origin;
 };
 
-// The link carries no secret of the name's. Whoever opens it while signed in
-// to the cloud ties this name to their account, so it goes to the person
-// and is good for a few minutes only.
-export function linkFor(me: Identity, to: string) {
+// The link carries no secret of the machine's. Whoever opens it while signed
+// in to the cloud ties this machine to their account, so it goes to the
+// person and is good for a few minutes only.
+export function linkFor(to: string) {
+  const machine = machineIdentity();
   const t = new Date().toISOString();
   const query = new URLSearchParams({
-    key: me.publicKey,
-    name: me.name,
+    kind: 'machine',
+    key: machine.publicKey,
+    name: machine.name,
     t,
-    sig: signText(me, `parley-cloud-link\n${to}\n${t}\n${me.name}`),
+    sig: signText(machine, `parley-cloud-link-machine\n${to}\n${t}\n${machine.name}`),
   });
   return `${to}/link?${query}`;
 }
@@ -78,7 +80,11 @@ export function startAccount(
   let lastCheck = 0;
 
   async function fetchAttest() {
-    const body = JSON.stringify({ name: me.name });
+    const machine = machineIdentity();
+    const body = JSON.stringify({
+      name: me.name,
+      machine: { key: machine.publicKey, sig: signText(machine, `parley-cloud-machine\n${me.publicKey}`) },
+    });
     const time = new Date().toISOString();
     const digest = createHash('sha256').update(body).digest('hex');
     const res = await fetch(`${url}/api/attest`, {
@@ -151,12 +157,12 @@ export function startAccount(
       const a = attest && own(attest);
       return {
         url,
-        link: url && refusal === 'not linked' ? linkFor(me, url) : undefined,
+        link: url && refusal === 'not linked' ? linkFor(url) : undefined,
         error:
           refusal === 'banned'
-            ? 'the account this name is linked to is banned'
+            ? 'the account this machine is linked to is banned'
             : refusal === 'not linked'
-              ? 'this name is not linked to an account yet'
+              ? 'this machine is not linked to a parley account yet'
               : error,
         verified: a ? { domain: a.domain, kind: a.kind } : undefined,
       };
@@ -171,7 +177,7 @@ export function startAccount(
         writeJson(home, 'cloud.json', { url });
       }
       void check();
-      return { url: next, link: linkFor(me, next) };
+      return { url: next, link: linkFor(next) };
     },
     unlink() {
       writeJson(home, 'cloud.json', { url: null });

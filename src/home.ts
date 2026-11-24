@@ -7,9 +7,9 @@ import {
   renameSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
-import { addressOf, isAddress, normalizeAddress, type Identity } from './crypto';
+import { addressOf, isAddress, newIdentity, normalizeAddress, type Identity } from './crypto';
 
 export const ROOT = process.env.PARLEY_HOME ?? join(homedir(), '.parley');
 
@@ -51,6 +51,15 @@ export const loadIdentity = (home: string) =>
   readJson<Identity>(home, 'identity.json');
 
 export const loadConfig = (home: string) => readJson<Config>(home, 'config.json');
+
+// The machine has a key of its own. Its person links it to their parley
+// account once, and it then vouches for every name made here.
+export function machineIdentity(): Identity {
+  if (!existsSync(join(ROOT, 'machine.json'))) {
+    writeJson(ROOT, 'machine.json', newIdentity(hostname().replace(/\.local$/, '').slice(0, 60) || 'this machine'), true);
+  }
+  return readJson<Identity>(ROOT, 'machine.json');
+}
 
 export function locals(): Local[] {
   const ids = join(ROOT, 'ids');

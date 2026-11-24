@@ -356,6 +356,7 @@ type Account = { sub: string; domain: string | null; banned?: boolean; lifetime?
 // the accounts it is told about their proofs.
 function startCloudStub() {
   const accounts = new Map<string, Account>();
+  const machines = new Map<string, Account>();
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -364,7 +365,9 @@ function startCloudStub() {
       const [key, time, sig] = ['x-parley-key', 'x-parley-time', 'x-parley-sig'].map((h) => req.headers.get(h) ?? '');
       const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');
       const signed = verifyText(key ?? '', `parley-cloud-attest\n${time}\n${digest}`, sig ?? '');
-      const account = signed ? accounts.get(key ?? '') : undefined;
+      const m = (JSON.parse(text) as { machine?: { key: string; sig: string } }).machine;
+      const vouched = m && verifyText(m.key, `parley-cloud-machine\n${key}`, m.sig) ? machines.get(m.key) : undefined;
+      const account = signed ? (accounts.get(key ?? '') ?? vouched) : undefined;
       if (!account) return Response.json({ error: 'not linked' }, { status: 403 });
       if (account.banned) return Response.json({ error: 'banned' }, { status: 403 });
       const iat = unix();
@@ -373,7 +376,7 @@ function startCloudStub() {
     },
   });
   cleanup.push(() => server.stop(true));
-  return { url: `http://127.0.0.1:${server.port}`, accounts };
+  return { url: `http://127.0.0.1:${server.port}`, accounts, machines };
 }
 
 async function accounts() {
@@ -391,7 +394,15 @@ async function accounts() {
   const refused = await mia.tool('list_agents');
   check('a name no account owns is refused, and list_agents gives the link to open', refused.text.includes('Not connected to the relay: this relay needs a parley account') && refused.text.includes('Ask your user to open this link') && refused.text.includes(`${stub.url}/link?`), refused);
   const out = cli(join(base, 'machine-m'), 'cloud', 'link', '--url', stub.url);
-  check('parley cloud link prints a link for the name', out.includes(`${stub.url}/link?key=`), out);
+  const machineM = readJson<Identity>(join(base, 'machine-m'), 'machine.json');
+  const shownLink = new URL(/http\S+\/link\?\S+/.exec(refused.text)?.[0] ?? 'http://none');
+  const q = shownLink.searchParams;
+  check(
+    'the link is for the machine, signed by its key and not by the name',
+    q.get('kind') === 'machine' && q.get('key') === machineM.publicKey && q.get('key') !== key('machine-m', miaAddr) && verifyText(machineM.publicKey, `parley-cloud-link-machine\n${stub.url}\n${q.get('t')}\n${q.get('name')}`, q.get('sig') ?? ''),
+    refused.text,
+  );
+  check('parley cloud link prints the same kind of link', out.includes(`${stub.url}/link?kind=machine&key=${machineM.publicKey}`), out);
 
   stub.accounts.set(key('machine-m', miaAddr), { sub: 'acct-mia', domain: 'mia.example' });
   stub.accounts.set(key('machine-n', nedAddr), { sub: 'acct-ned', domain: 'ned.example' });
@@ -577,6 +588,64 @@ async function accountRelays() {
   }
 }
 
+async function twoRelays() {
+  console.log('\n-- two relays behind one address');
+  const free = () => {
+    const probe = Bun.serve({ port: 0, fetch: () => new Response('') });
+    const { port } = probe;
+    probe.stop(true);
+    return port;
+  };
+  const [p1, p2] = [free(), free()];
+  const urls = [`ws://127.0.0.1:${p1}`, `ws://127.0.0.1:${p2}`];
+  // Each relay also finds itself under another spelling of its own address.
+  const peers = (i: number) => ({ port: [p1, p2][i]!, hostname: '127.0.0.1', secret: 'between-relays', self: urls[i]!, discover: async () => [...urls, `${urls[i]}/`] });
+  const east = startRelay(0, '127.0.0.1', { peers: peers(0) });
+  const west = startRelay(0, '127.0.0.1', { peers: peers(1) });
+  cleanup.push(() => east.stop(true), () => west.stop(true));
+  const at = (r: { port?: number }) => ({ PARLEY_RELAY: `ws://127.0.0.1:${r.port}` });
+  const eveSock = fakeSession();
+  const walSock = fakeSession();
+  const eveRoot = mkdtempSync(join(base, 'eve-'));
+  const eve = await agent(eveRoot, 'session-eve', { ...eveSock.env, ...at(east) });
+  const wal = await agent(mkdtempSync(join(base, 'wal-')), 'session-wal', { ...walSock.env, ...at(west) });
+  const eveAddr = addressIn((await eve.tool('setup', { name: 'Eve' })).text);
+  const walAddr = addressIn((await wal.tool('setup', { name: 'Wal' })).text);
+
+  const over = await eventually(async () => {
+    const r = await eve.tool('send_message', { to: walAddr, message: 'across the relays' });
+    return r.failed ? undefined : r;
+  });
+  check('a name on one relay reaches a name on the other', over?.text === `Delivered to "Wal" (${walAddr}).` && walSock.texts().some((t) => t.includes('across the relays')), over);
+  const back = await wal.tool('send_message', { to: 'Eve', message: 'and back' });
+  check('and the reply comes back', !back.failed && eveSock.texts().some((t) => t.includes('and back')), back);
+  const nobody = await eve.tool('send_message', { to: 'abc-def-ghj', message: 'anyone?' });
+  check('an id on neither relay is not online', nobody.failed && nobody.text.includes('is not online'), nobody);
+
+  await eve.close();
+  const moved = await agent(eveRoot, 'session-eve', { ...eveSock.env, ...at(west) });
+  const again = await eventually(async () => {
+    const r = await wal.tool('send_message', { to: 'Eve', message: 'you moved' });
+    return r.failed ? undefined : r;
+  });
+  check('a name that reconnects to the other relay is found there', again && eveSock.texts().some((t) => t.includes('you moved')), again);
+  await moved.close();
+  const gone = await eventually(async () => {
+    const r = await wal.tool('send_message', { to: eveAddr, message: 'still there?' });
+    return r.failed && r.text.includes('is not online') ? r : undefined;
+  });
+  check('and is not online once it closes', gone, gone);
+
+  await Bun.sleep(4000);
+  const steady = await wal.tool('list_agents');
+  check('a relay that finds itself among its peers keeps its names online', steady.text.includes('Connected to the relay.'), steady);
+
+  const outsider = new WebSocket(`ws://127.0.0.1:${p1}`);
+  const closed = new Promise<number>((resolve) => (outsider.onclose = (ev) => resolve(ev.code)));
+  outsider.onopen = () => outsider.send(JSON.stringify({ t: 'peer', secret: 'a guess', from: 'ws://evil' }));
+  check('a relay without the shared secret is turned away', (await closed) === 4001);
+}
+
 // Claude Code's own registry of the sessions open on this machine, as its
 // SendMessage reads it.
 function register(name: string, socket: string, pid?: number) {
@@ -588,6 +657,39 @@ function register(name: string, socket: string, pid?: number) {
   writeJson(dir, `${id}.json`, { pid: id, name, messagingSocketPath: socket, status: 'idle' });
   writeJson(dir, `${id}.${createHash('sha256').update(socket).digest('hex')}.key`, { peerToken }, true);
   return { peerToken, forget: () => rmSync(join(dir, `${id}.json`)) };
+}
+
+async function linkedMachine() {
+  console.log('\n-- a machine linked to an account');
+  const stub = startCloudStub();
+  const gated = startRelay(0, '127.0.0.1', { issuers: [cloudIssuer.publicKey] });
+  cleanup.push(() => gated.stop(true));
+  const root = mkdtempSync(join(base, 'linked-'));
+  const env = { PARLEY_CLOUD: stub.url, PARLEY_RELAY: `ws://127.0.0.1:${gated.port}` };
+  const [oneSock, twoSock] = [fakeSession(), fakeSession()];
+  const one = await agent(root, 'session-one', { ...env, ...oneSock.env });
+  await one.tool('setup', { name: 'One' });
+  const before = await one.tool('list_agents');
+  check('before the machine is linked, its session is refused', before.text.includes('This machine is not linked to a parley account yet'), before);
+  stub.machines.set(readJson<Identity>(root, 'machine.json').publicKey, { sub: 'acct-owner', domain: 'owner.example' });
+  const on = await eventually(async () => {
+    const r = await one.tool('list_agents');
+    return r.text.includes('Connected to the relay.') ? r : undefined;
+  }, 45_000);
+  check('once it is linked, the session gets on by itself', on?.text.includes('verified · owner.example'), on);
+  const two = await agent(root, 'session-two', { ...env, ...twoSock.env });
+  const twoAddr = addressIn((await two.tool('setup', { name: 'Two' })).text);
+  const second = await eventually(async () => {
+    const r = await two.tool('list_agents');
+    return r.text.includes('Connected to the relay.') ? r : undefined;
+  }, 20_000);
+  check('a new name on the machine needs no link of its own', second?.text.includes('verified · owner.example') && !second.text.includes('/link?'), second);
+  const sent = await one.tool('send_message', { to: twoAddr, message: 'same account' });
+  check('and the two message each other', !sent.failed && twoSock.texts().some((t) => t.includes('same account')), sent);
+  const stranger = await agent(mkdtempSync(join(base, 'other-')), 'session-x', { ...env, ...fakeSession().env });
+  await stranger.tool('setup', { name: 'Stranger' });
+  const no = await stranger.tool('list_agents');
+  check('a name on another machine is still refused', no.text.includes('Not connected to the relay'), no);
 }
 
 async function sessionsHere() {
@@ -632,7 +734,9 @@ try {
   await olderNode();
   await accountRelays();
   await accounts();
+  await linkedMachine();
   await sessionsHere();
+  await twoRelays();
 } catch (err) {
   failures++;
   console.log('FAIL  the run stopped early ->', err instanceof Error ? err.stack : err);

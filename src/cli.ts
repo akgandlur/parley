@@ -1,24 +1,26 @@
 #!/usr/bin/env bun
+import { resolve6 } from 'node:dns/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { linkFor } from './account';
 import { loadIdentity, locals, mine, readJson, sameName, type Local } from './home';
 import { runMcp } from './mcp';
-import { startRelay } from './relay';
+import { startRelay, type Peering } from './relay';
 import { setUp } from './setup';
 
 const USAGE = `parley: messages between Claude Code sessions on different machines
 
   parley init --name <name> --relay <ws url>
   parley id                 show the names on this machine and their ids
-  parley cloud link [--url <https url>]   print a link that ties this name to your parley account
+  parley cloud link [--url <https url>]   print a link that ties this machine to your parley account
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
   parley relay [--port 8787] [--host 0.0.0.0] [--issuer <key>]...
-                            --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof`;
+                            --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof
+                            PARLEY_RELAY_PEER_DNS or PARLEY_RELAY_PEERS joins several relays behind one address; see the README`;
 
 const [command, ...rest] = process.argv.slice(2);
 
@@ -51,6 +53,29 @@ function pick(): Local {
   return found;
 }
 
+// Several relays behind one address: PARLEY_RELAY_PEER_DNS names a record
+// that lists every relay's address (PARLEY_RELAY_PEER_SELF is this one's), or
+// PARLEY_RELAY_PEERS lists their ws URLs (PARLEY_RELAY_PEER_URL is this one's).
+function peering(): Peering | undefined {
+  const { PARLEY_RELAY_PEER_DNS: name, PARLEY_RELAY_PEERS: urls } = process.env;
+  if (!name && !urls) return undefined;
+  const port = Number(process.env.PARLEY_RELAY_PEER_PORT ?? 8788);
+  const secret = process.env.PARLEY_RELAY_PEER_SECRET;
+  if (!secret) throw new Error('PARLEY_RELAY_PEER_SECRET is not set: relays that peer share a secret');
+  const at = (ip: string) => `ws://[${ip.toLowerCase()}]:${port}`;
+  const own = name ? process.env.PARLEY_RELAY_PEER_SELF : process.env.PARLEY_RELAY_PEER_URL;
+  if (!own) throw new Error(`${name ? 'PARLEY_RELAY_PEER_SELF' : 'PARLEY_RELAY_PEER_URL'} is not set: a relay that peers has to know its own address`);
+  return {
+    port,
+    hostname: process.env.PARLEY_RELAY_PEER_HOST ?? '::',
+    secret,
+    self: name ? at(own) : own,
+    discover: name
+      ? async () => (await resolve6(name)).map(at)
+      : async () => urls!.split(',').map((u) => u.trim()).filter(Boolean),
+  };
+}
+
 async function main() {
   switch (command) {
     case 'init': {
@@ -75,7 +100,7 @@ async function main() {
       if (!url) throw new Error('no cloud address is known; add --url https://cloud.example.com');
       const origin = new URL(url).origin;
       return console.log(
-        `Open this while signed in to ${origin}. It works for 15 minutes.\n${linkFor(loadIdentity(home), origin)}`,
+        `Open this while signed in to ${origin}. It works for 15 minutes.\n${linkFor(origin)}`,
       );
     }
     case 'mcp':
@@ -93,7 +118,7 @@ async function main() {
         }),
         ...(process.env.PARLEY_RELAY_ISSUERS ?? '').split(',').map((k) => k.trim()).filter(Boolean),
       ];
-      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers });
+      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers, peers: peering() });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

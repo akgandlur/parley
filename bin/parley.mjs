@@ -6976,6 +6976,7 @@ var require_dist = __commonJS(function(exports, module) {
 });
 
 // src/cli.ts
+import { resolve6 } from "dns/promises";
 import { existsSync as existsSync5 } from "fs";
 import { join as join8 } from "path";
 
@@ -7131,7 +7132,7 @@ import {
   renameSync,
   writeFileSync
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 var ROOT = process.env.PARLEY_HOME ?? join(homedir(), ".parley");
 function readJson(home, name) {
@@ -7153,6 +7154,12 @@ function writeJson(home, name, value, secret = false) {
 }
 var loadIdentity = (home) => readJson(home, "identity.json");
 var loadConfig = (home) => readJson(home, "config.json");
+function machineIdentity() {
+  if (!existsSync(join(ROOT, "machine.json"))) {
+    writeJson(ROOT, "machine.json", newIdentity(hostname().replace(/\.local$/, "").slice(0, 60) || "this machine"), true);
+  }
+  return readJson(ROOT, "machine.json");
+}
 function locals() {
   const ids = join(ROOT, "ids");
   const under = existsSync(ids) ? readdirSync(ids).map((d) => join(ids, d)) : [];
@@ -7242,16 +7249,18 @@ function take(address) {
 // src/account.ts
 var RENEW_LEFT_MS = 18 * 3600000;
 var CHECK_MS = 2 * 60000;
-function linkFor(me, to) {
+function linkFor(to) {
+  const machine = machineIdentity();
   const t = new Date().toISOString();
   const query = new URLSearchParams({
-    key: me.publicKey,
-    name: me.name,
+    kind: "machine",
+    key: machine.publicKey,
+    name: machine.name,
     t,
-    sig: signText(me, `parley-cloud-link
+    sig: signText(machine, `parley-cloud-link-machine
 ${to}
 ${t}
-${me.name}`)
+${machine.name}`)
   });
   return `${to}/link?${query}`;
 }
@@ -7266,7 +7275,7 @@ import {
   renameSync as renameSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
+import { homedir as homedir2, hostname as hostname2 } from "node:os";
 import { join as join2 } from "node:path";
 var ROOT2 = process.env.PARLEY_HOME ?? join2(homedir2(), ".parley");
 function readJson2(home, name) {
@@ -21986,16 +21995,18 @@ var originOf = (url) => {
   }
   return parsed.origin;
 };
-function linkFor2(me, to) {
+function linkFor2(to) {
+  const machine = machineIdentity();
   const t = new Date().toISOString();
   const query = new URLSearchParams({
-    key: me.publicKey,
-    name: me.name,
+    kind: "machine",
+    key: machine.publicKey,
+    name: machine.name,
     t,
-    sig: signText(me, `parley-cloud-link
+    sig: signText(machine, `parley-cloud-link-machine
 ${to}
 ${t}
-${me.name}`)
+${machine.name}`)
   });
   return `${to}/link?${query}`;
 }
@@ -22021,7 +22032,12 @@ function startAccount(home, me, log, renewed) {
   let checking;
   let lastCheck = 0;
   async function fetchAttest() {
-    const body = JSON.stringify({ name: me.name });
+    const machine = machineIdentity();
+    const body = JSON.stringify({
+      name: me.name,
+      machine: { key: machine.publicKey, sig: signText(machine, `parley-cloud-machine
+${me.publicKey}`) }
+    });
     const time = new Date().toISOString();
     const digest = createHash2("sha256").update(body).digest("hex");
     const res = await fetch(`${url}/api/attest`, {
@@ -22090,8 +22106,8 @@ ${digest}`)
       const a = attest && own(attest);
       return {
         url,
-        link: url && refusal === "not linked" ? linkFor2(me, url) : undefined,
-        error: refusal === "banned" ? "the account this name is linked to is banned" : refusal === "not linked" ? "this name is not linked to an account yet" : error,
+        link: url && refusal === "not linked" ? linkFor2(url) : undefined,
+        error: refusal === "banned" ? "the account this machine is linked to is banned" : refusal === "not linked" ? "this machine is not linked to a parley account yet" : error,
         verified: a ? { domain: a.domain, kind: a.kind } : undefined
       };
     },
@@ -22106,7 +22122,7 @@ ${digest}`)
         writeJson(home, "cloud.json", { url });
       }
       check();
-      return { url: next, link: linkFor2(me, next) };
+      return { url: next, link: linkFor2(next) };
     },
     unlink() {
       writeJson(home, "cloud.json", { url: null });
@@ -22131,7 +22147,7 @@ var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.8.0";
+var VERSION = "0.9.0";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -22585,7 +22601,7 @@ var INSTRUCTIONS = `parley lets this Claude Code session message any Claude Code
 
 A session on this machine is reached by its Claude Code session name, with no setup. To be reachable from other machines, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone elsewhere to reach this session. send_message sends to a session name, an id, or a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
-The hosted relay lets a name on once it is linked to a parley account, once per name. When list_agents shows a link, give it to your user to open while signed in.`;
+The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.`;
 var log = (...parts) => console.error(new Date().toISOString(), "parley:", ...parts);
 var text = (t) => ({ content: [{ type: "text", text: t }] });
 function unnamed() {
@@ -22704,7 +22720,7 @@ async function runMcp() {
     return `This session is now "${made.name}", a new name. Its id is ${made.address}. Give this id to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
   }));
   server.registerTool("list_agents", {
-    description: "Show the names you can message: the Claude Code sessions on this machine, other parley names here, and everyone you have exchanged a message with. Also shows this session's parley name and id and whether it is connected. If the name is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses a name until then."
+    description: "Show the names you can message: the Claude Code sessions on this machine, other parley names here, and everyone you have exchanged a message with. Also shows this session's parley name and id and whether it is connected. If this machine is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses its sessions until then."
   }, () => reply(async () => {
     await starting;
     const here = sessionLines();
@@ -22721,7 +22737,7 @@ async function runMcp() {
       s.relay.connected ? "Connected to the relay." : `Not connected to the relay: ${s.relay.error}.`
     ];
     if (s.account.link) {
-      lines.push(`This name is not linked to a parley account yet, so the relay will not let it on. Ask your user to open this link while signed in to ${s.account.url}; it works for 15 minutes:`, s.account.link);
+      lines.push(`This machine is not linked to a parley account yet, so the relay will not let its sessions on. Ask your user to open this link while signed in to ${s.account.url}; it works for 15 minutes, and is needed once per machine:`, s.account.link);
     } else if (s.account.error) {
       lines.push(`Account: ${s.account.error}.`);
     }
@@ -22755,11 +22771,11 @@ async function runMcp() {
     return `Delivered to "${name}" (${address}).`;
   }));
   server.registerTool("cloud_link", {
-    description: "Tie this session's parley name to your user's parley account. The hosted relay needs this before the name can connect, and it is done once per name. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",
+    description: "Tie this machine to your user's parley account. The hosted relay needs this before a session here can connect, and it is done once per machine: every session on it is then on the account. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",
     inputSchema: { url: string2().max(500).optional().describe("The cloud address, if your user gave one") }
   }, ({ url }) => named(async (a) => {
     const made = a.account.link(url ?? process.env.PARLEY_CLOUD);
-    return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the name is linked:
+    return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the machine is linked:
 ${made.link}`;
   }));
   process.stdin.on("end", () => process.exit(0));
@@ -22772,7 +22788,7 @@ ${made.link}`;
 }
 
 // src/relay.ts
-import { randomBytes as randomBytes2 } from "node:crypto";
+import { randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 var RELAY_AUTH2 = "parley relay auth ";
 var HELLO_MS = 1e4;
 var MAX_CONNECTIONS = 500;
@@ -22782,6 +22798,8 @@ var MAX_BYTES_PER_WINDOW2 = 4 * 1024 * 1024;
 var MAX_PER_IP = 100;
 var MAX_PER_ACCOUNT = 50;
 var NEEDS_ACCOUNT = "this relay needs a parley account: update parley and link this name";
+var PEER_DIAL_MS = 3000;
+var sameSecret = (a, b) => typeof b === "string" && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 var log2 = (...parts) => console.log(new Date().toISOString(), ...parts);
 var LOOPBACK2 = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 var bump = (counts, key, by) => {
@@ -22798,6 +22816,123 @@ function startRelay(port, hostname, opts = {}) {
   const perIp = new Map;
   const perSub = new Map;
   let connections = 0;
+  const remote = new Map;
+  const links = new Map;
+  const dialling = new Set;
+  const own = new Set;
+  function toPeers(frame) {
+    const text = JSON.stringify(frame);
+    for (const link of links.values())
+      link.send(text);
+  }
+  function forget(peer) {
+    for (const [address, at] of remote)
+      if (at === peer)
+        remote.delete(address);
+  }
+  function elsewhere(address, peer) {
+    remote.set(address, peer);
+    online.get(address)?.close(4002, "replaced by a newer connection");
+  }
+  function dial(peer, secret, self) {
+    dialling.add(peer);
+    const link = new WebSocket(peer);
+    link.onopen = () => {
+      link.send(JSON.stringify({ t: "peer", secret, from: self }));
+      link.send(JSON.stringify({ t: "ids", addresses: [...online.keys()] }));
+      links.set(peer, link);
+      log2("peer link up", peer);
+    };
+    link.onclose = (ev) => {
+      dialling.delete(peer);
+      if (ev.code === 4004)
+        own.add(peer);
+      if (links.get(peer) === link) {
+        links.delete(peer);
+        log2("peer link down", peer);
+      }
+    };
+    link.onerror = () => {};
+  }
+  function fromPeer(ws, msg, secret, self) {
+    if (!ws.data.peer) {
+      if (msg.t !== "peer" || !sameSecret(secret, msg.secret) || typeof msg.from !== "string") {
+        ws.close(4001, "bad peer hello");
+        return;
+      }
+      if (msg.from === self) {
+        ws.close(4004, "this is the same relay");
+        return;
+      }
+      clearTimeout(ws.data.helloTimer);
+      ws.data.peer = msg.from;
+      return;
+    }
+    const { peer } = ws.data;
+    if (msg.t === "ids" && Array.isArray(msg.addresses)) {
+      forget(peer);
+      for (const address of msg.addresses)
+        elsewhere(String(address), peer);
+    } else if (msg.t === "on" && typeof msg.address === "string") {
+      elsewhere(msg.address, peer);
+    } else if (msg.t === "off" && typeof msg.address === "string") {
+      if (remote.get(msg.address) === peer)
+        remote.delete(msg.address);
+    } else if (msg.t === "fwd" && typeof msg.to === "string" && typeof msg.from === "string") {
+      const target = online.get(msg.to);
+      if (target)
+        target.send(JSON.stringify({ t: "recv", from: msg.from, payload: msg.payload }));
+      else
+        links.get(peer)?.send(JSON.stringify({ t: "nack", to: msg.to, from: msg.from, ref: msg.ref }));
+    } else if (msg.t === "nack" && typeof msg.to === "string" && typeof msg.from === "string") {
+      if (remote.get(msg.to) === peer)
+        remote.delete(msg.to);
+      online.get(msg.from)?.send(JSON.stringify({ t: "undeliverable", to: msg.to, ref: msg.ref }));
+    }
+  }
+  let peerServer;
+  let dialTimer;
+  if (opts.peers) {
+    const { secret, self, discover } = opts.peers;
+    if (!secret)
+      throw new Error("relays that peer need a shared secret");
+    peerServer = Bun.serve({
+      port: opts.peers.port,
+      hostname: opts.peers.hostname,
+      fetch(req, server) {
+        if (server.upgrade(req, { data: {} }))
+          return;
+        return new Response(`parley relay peers
+`);
+      },
+      websocket: {
+        data: {},
+        maxPayloadLength: 320 * 1024,
+        open(ws) {
+          ws.data.helloTimer = setTimeout(() => ws.close(4001, "no peer hello"), HELLO_MS);
+        },
+        message(ws, raw) {
+          try {
+            fromPeer(ws, JSON.parse(String(raw)), secret, self);
+          } catch {
+            ws.close(4000, "malformed message");
+          }
+        },
+        close(ws) {
+          clearTimeout(ws.data.helloTimer);
+          if (ws.data.peer)
+            forget(ws.data.peer);
+        }
+      }
+    });
+    const dialAll = () => discover().then((found) => {
+      for (const peer of found)
+        if (peer !== self && !own.has(peer) && !links.has(peer) && !dialling.has(peer))
+          dial(peer, secret, self);
+    }, (err) => log2("could not look up peer relays:", err instanceof Error ? err.message : err));
+    dialAll();
+    dialTimer = setInterval(dialAll, PEER_DIAL_MS);
+  }
   function admit(ws, att, publicKey) {
     if (!accounts)
       return true;
@@ -22838,6 +22973,8 @@ function startRelay(port, hostname, opts = {}) {
     clearTimeout(ws.data.helloTimer);
     online.get(address)?.close(4002, "replaced by a newer connection");
     online.set(address, ws);
+    remote.delete(address);
+    toPeers({ t: "on", address });
     ws.data.address = address;
     ws.data.publicKey = msg.publicKey;
     log2("online", address);
@@ -22849,7 +22986,7 @@ function startRelay(port, hostname, opts = {}) {
     const hops = req.headers.get("x-forwarded-for")?.split(",");
     return hops?.[hops.length - 1]?.trim() || peer;
   }
-  return Bun.serve({
+  const server = Bun.serve({
     port,
     hostname,
     fetch(req, server) {
@@ -22922,6 +23059,11 @@ function startRelay(port, hostname, opts = {}) {
           return;
         const target = online.get(msg.to);
         if (!target) {
+          const link = links.get(remote.get(msg.to) ?? "");
+          if (link) {
+            link.send(JSON.stringify({ t: "fwd", to: msg.to, from: ws.data.address, ref: msg.ref, payload: msg.payload }));
+            return;
+          }
           ws.send(JSON.stringify({ t: "undeliverable", to: msg.to, ref: msg.ref }));
           return;
         }
@@ -22942,11 +23084,21 @@ function startRelay(port, hostname, opts = {}) {
         const { address } = ws.data;
         if (address && online.get(address) === ws) {
           online.delete(address);
+          toPeers({ t: "off", address });
           log2("offline", address);
         }
       }
     }
   });
+  const stop = server.stop.bind(server);
+  server.stop = (closeActive) => {
+    clearInterval(dialTimer);
+    for (const link of links.values())
+      link.close();
+    peerServer?.stop(closeActive);
+    return stop(closeActive);
+  };
+  return server;
 }
 
 // src/setup.ts
@@ -22975,14 +23127,15 @@ var USAGE = `parley: messages between Claude Code sessions on different machines
 
   parley init --name <name> --relay <ws url>
   parley id                 show the names on this machine and their ids
-  parley cloud link [--url <https url>]   print a link that ties this name to your parley account
+  parley cloud link [--url <https url>]   print a link that ties this machine to your parley account
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
   parley relay [--port 8787] [--host 0.0.0.0] [--issuer <key>]...
-                            --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof`;
+                            --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof
+                            PARLEY_RELAY_PEER_DNS or PARLEY_RELAY_PEERS joins several relays behind one address; see the README`;
 var [command, ...rest] = process.argv.slice(2);
 function flag(name) {
   const at = rest.indexOf(name);
@@ -23016,6 +23169,26 @@ ${listed(all)}`);
   }
   return found;
 }
+function peering() {
+  const { PARLEY_RELAY_PEER_DNS: name, PARLEY_RELAY_PEERS: urls } = process.env;
+  if (!name && !urls)
+    return;
+  const port = Number(process.env.PARLEY_RELAY_PEER_PORT ?? 8788);
+  const secret = process.env.PARLEY_RELAY_PEER_SECRET;
+  if (!secret)
+    throw new Error("PARLEY_RELAY_PEER_SECRET is not set: relays that peer share a secret");
+  const at = (ip) => `ws://[${ip.toLowerCase()}]:${port}`;
+  const own = name ? process.env.PARLEY_RELAY_PEER_SELF : process.env.PARLEY_RELAY_PEER_URL;
+  if (!own)
+    throw new Error(`${name ? "PARLEY_RELAY_PEER_SELF" : "PARLEY_RELAY_PEER_URL"} is not set: a relay that peers has to know its own address`);
+  return {
+    port,
+    hostname: process.env.PARLEY_RELAY_PEER_HOST ?? "::",
+    secret,
+    self: name ? at(own) : own,
+    discover: name ? async () => (await resolve6(name)).map(at) : async () => urls.split(",").map((u) => u.trim()).filter(Boolean)
+  };
+}
 async function main() {
   switch (command) {
     case "init": {
@@ -23046,7 +23219,7 @@ ${l.address}`).join(`
         throw new Error("no cloud address is known; add --url https://cloud.example.com");
       const origin = new URL(url).origin;
       return console.log(`Open this while signed in to ${origin}. It works for 15 minutes.
-${linkFor(loadIdentity2(home), origin)}`);
+${linkFor(origin)}`);
     }
     case "mcp":
       return runMcp();
@@ -23065,7 +23238,7 @@ ${linkFor(loadIdentity2(home), origin)}`);
         }),
         ...(process.env.PARLEY_RELAY_ISSUERS ?? "").split(",").map((k) => k.trim()).filter(Boolean)
       ];
-      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0", { issuers });
+      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0", { issuers, peers: peering() });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

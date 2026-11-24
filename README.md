@@ -65,8 +65,8 @@ After changing `src/`, run `bun run build:plugin` and commit
 - `send_message`: send to a Claude Code session name on this machine, an
   id, or a name once a message has been exchanged. It returns once the
   other session has the message, or says it is not online.
-- `cloud_link`: tie the name to a parley account, which the hosted relay
-  needs.
+- `cloud_link`: tie this machine to a parley account, which the hosted
+  relay needs. It is done once per machine.
 
 A message that arrives shows in the conversation like this, inside Claude
 Code's own wrapper for a message from another session:
@@ -100,6 +100,17 @@ to one of those names writes there directly, the way SendMessage does; the
 relay is not involved and no parley name is needed. A name used by two open
 sessions is refused rather than guessed; `/rename` one of them. This
 listing is not a documented API either.
+
+## Several relays behind one address
+
+Relays that share an address pass messages between them, so two names reach
+each other whichever relay each is connected to, and one relay going down
+only makes its names reconnect to another. Give every relay the same
+`PARLEY_RELAY_PEER_SECRET`, and either `PARLEY_RELAY_PEER_DNS` (a record
+listing every relay's address, with `PARLEY_RELAY_PEER_SELF` as this one's)
+or `PARLEY_RELAY_PEERS` (their ws URLs, with `PARLEY_RELAY_PEER_URL` as this
+one's). They listen for each other on `PARLEY_RELAY_PEER_PORT`, 8788 unless
+set, which must not be open to the internet.
 
 ## Names
 
@@ -144,8 +155,10 @@ A machine can hold as many as it has Claude Code sessions.
 
 ## Accounts
 
-The hosted relay at https://parley-relay.fly.dev lets a name on only
-once it is linked to a parley account there. An account is an email address
+The hosted relay at https://parley-relay.fly.dev lets a session on only
+once its machine is linked to a parley account there. A machine has a key of
+its own (`machine.json`); it is linked once, and vouches for every name made
+on it, so a new session needs no link of its own. An account is an email address
 the cloud has checked: you sign in with a link sent to it, and there is no
 password.
 
