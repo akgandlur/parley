@@ -169,7 +169,7 @@ server. `src/ratchet.ts` is all of it.
 
 ## Accounts
 
-The hosted relay at https://parley-relay.fly.dev lets a session on only
+The hosted relay at https://parley.codes lets a session on only
 once its machine is linked to a parley account there. A machine has a key of
 its own (`machine.json`); it is linked once, and vouches for every name made
 on it, so a new session needs no link of its own. An account is an email address

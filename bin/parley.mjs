@@ -22242,7 +22242,7 @@ var TALK_KEEP_MS = 7 * 24 * 3600000;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.9.0";
+var VERSION = "0.9.1";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
