@@ -22238,6 +22238,7 @@ function safetyNumber(a, b) {
 // src/relay.ts
 var RELAY_AUTH = "parley relay auth ";
 var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
+var TALK_KEEP_MS = 7 * 24 * 3600000;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
@@ -22872,6 +22873,9 @@ var MAX_PER_IP = 100;
 var MAX_PER_ACCOUNT = 50;
 var NEEDS_ACCOUNT = "this relay needs a parley account: update parley and link this name";
 var PEER_DIAL_MS = 3000;
+var TALK_SHARE_MS = 60000;
+var TALK_KEEP_MS2 = 7 * 24 * 3600000;
+var MAX_TALKS = 50;
 var sameSecret = (a, b) => typeof b === "string" && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 var log2 = (...parts) => console.log(new Date().toISOString(), ...parts);
 var LOOPBACK2 = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -22893,11 +22897,36 @@ function startRelay(port, hostname, opts = {}) {
   const links = new Map;
   const dialling = new Set;
   const own = new Set;
+  const talks = new Map;
   function toPeers(frame) {
     const text = JSON.stringify(frame);
     for (const link of links.values())
       link.send(text);
   }
+  function talked(a, b, share) {
+    const now = Date.now();
+    const known = now - (talks.get(a)?.get(b) ?? 0) < TALK_SHARE_MS;
+    for (const [id, other] of [[a, b], [b, a]]) {
+      const peers = talks.get(id) ?? new Map;
+      talks.set(id, peers);
+      peers.delete(other);
+      peers.set(other, now);
+      if (peers.size > MAX_TALKS)
+        peers.delete(peers.keys().next().value);
+    }
+    if (share && !known)
+      toPeers({ t: "talk", a, b });
+  }
+  const talkSweep = setInterval(() => {
+    const cutoff = Date.now() - TALK_KEEP_MS2;
+    for (const [id, peers] of talks) {
+      for (const [other, at] of peers)
+        if (at < cutoff)
+          peers.delete(other);
+      if (!peers.size)
+        talks.delete(id);
+    }
+  }, 3600000);
   function forget(peer) {
     for (const [address, at] of remote)
       if (at === peer)
@@ -22953,14 +22982,17 @@ function startRelay(port, hostname, opts = {}) {
         remote.delete(msg.address);
     } else if (msg.t === "fwd" && typeof msg.to === "string" && typeof msg.from === "string") {
       const target = online.get(msg.to);
-      if (target)
+      if (target) {
         target.send(JSON.stringify({ t: "recv", from: msg.from, payload: msg.payload }));
-      else
+        talked(msg.from, msg.to, true);
+      } else
         links.get(peer)?.send(JSON.stringify({ t: "nack", to: msg.to, from: msg.from, ref: msg.ref }));
     } else if (msg.t === "nack" && typeof msg.to === "string" && typeof msg.from === "string") {
       if (remote.get(msg.to) === peer)
         remote.delete(msg.to);
       online.get(msg.from)?.send(JSON.stringify({ t: "undeliverable", to: msg.to, ref: msg.ref }));
+    } else if (msg.t === "talk" && typeof msg.a === "string" && typeof msg.b === "string") {
+      talked(msg.a, msg.b, false);
     }
   }
   let peerServer;
@@ -23063,6 +23095,19 @@ function startRelay(port, hostname, opts = {}) {
     port,
     hostname,
     fetch(req, server) {
+      if (req.method === "POST" && new URL(req.url).pathname === "/online") {
+        const local = LOOPBACK2.has(clientIp(req, server.requestIP(req)?.address ?? ""));
+        return req.json().then((body) => {
+          const ids = Array.isArray(body?.ids) ? body.ids.slice(0, 500).map(String) : [];
+          const answer = {
+            online: ids.filter((id) => online.has(id) || links.has(remote.get(id) ?? ""))
+          };
+          if (local)
+            answer.talks = Object.fromEntries(ids.filter((id) => talks.has(id)).map((id) => [id, [...talks.get(id)].reverse()]));
+          return Response.json(answer);
+        }, () => new Response(`send {"ids": [...]}
+`, { status: 400 }));
+      }
       if (connections >= MAX_CONNECTIONS) {
         return new Response(`relay is full
 `, { status: 503 });
@@ -23145,6 +23190,7 @@ function startRelay(port, hostname, opts = {}) {
           from: ws.data.address,
           payload: msg.payload
         }));
+        talked(ws.data.address, msg.to, true);
       },
       close(ws) {
         connections--;
@@ -23166,6 +23212,7 @@ function startRelay(port, hostname, opts = {}) {
   const stop = server.stop.bind(server);
   server.stop = (closeActive) => {
     clearInterval(dialTimer);
+    clearInterval(talkSweep);
     for (const link of links.values())
       link.close();
     peerServer?.stop(closeActive);
