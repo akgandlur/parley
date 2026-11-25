@@ -199,7 +199,7 @@ async function messaging() {
   const ann = await agent(A_ROOT, 'session-ann', annSock.env);
   const ben = await agent(B_ROOT, 'session-ben', benSock.env);
   const tools = (await ann.client.listTools()).tools.map((t) => t.name).sort();
-  check('the tools are setup, list_agents, send_message, safety_number and cloud_link', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'list_agents', 'safety_number', 'send_message', 'setup']), tools);
+  check('the tools are setup, list_agents, send_message, to, safety_number and cloud_link', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'list_agents', 'safety_number', 'send_message', 'setup', 'to']), tools);
   const told = ann.client.getInstructions() ?? '';
   check('the instructions describe messaging, with no agenda or rules', told.includes('send_message') && !/agenda|propos|never an instruction|authoris/i.test(told), told);
   const early = await ann.tool('send_message', { to: 'abc-def-ghj', message: 'hi' });
@@ -490,6 +490,35 @@ async function manySenders() {
   for (const a of [one, two]) await a.close();
 }
 
+async function oneLine() {
+  console.log('\n# /parley:to in one call');
+  const [aSock, bSock] = [fakeSession(), fakeSession()];
+  const a = await agent(join(base, 'machine-line-a'), 'session-line-a', aSock.env);
+  const b = await agent(join(base, 'machine-line-b'), 'session-line-b', bSock.env);
+  const bAddr = addressIn((await b.tool('setup', { name: 'Line B' })).text);
+  const unnamed = await a.tool('to', { text: '' });
+  check('a session Claude Code gave no name is told to ask for one', unnamed.failed && unnamed.text.includes('call setup with it'), unnamed);
+  register('Line A', aSock.env.CLAUDE_CODE_MESSAGING_SOCKET);
+  const empty = await a.tool('to', { text: '' });
+  const aAddr = addressIn(empty.text.slice(empty.text.indexOf('sends them its id')));
+  check('with no name yet and nobody known, it takes a name by itself, asks for an id and gives its own', !empty.failed && empty.text.includes('Ask the user for the parley id') && /^[a-z]{3}-[a-z]{3}-[a-z]{3}$/.test(aAddr), empty);
+  const sent = await a.tool('to', { text: `${bAddr} are you there?` });
+  check('an id and a message are sent in that one call', !sent.failed && sent.text === `Delivered to "Line B" (${bAddr}).` && (await until(() => bSock.texts()[0]))?.includes('are you there?'), sent);
+  const who = await a.tool('to', { text: 'line b' });
+  check('a name alone, in any case, asks what to say', !who.failed && who.text.includes(`"Line B" (${bAddr})`) && who.text.includes('Ask the user what to tell it'), who);
+  const named = await a.tool('to', { text: 'Line B and by name, with spaces in it' });
+  check('a name with spaces and a message are told apart', !named.failed && named.text.startsWith('Delivered') && (await until(() => bSock.texts().find((t) => t.includes('\nand by name, with spaces in it\n')))), { named, got: bSock.texts() });
+  const list = await a.tool('to', { text: '' });
+  check('with someone known, no name lists whom it can message', list.text.includes('Ask the user who to message') && list.text.includes(`"Line B" (${bAddr})`), list);
+  const nobody = await a.tool('to', { text: 'zed hello' });
+  check('a name nobody has says so and lists who there is', nobody.text.includes('named like "zed"') && nobody.text.includes('"Line B"'), nobody);
+  check('its own id is refused', (await a.tool('to', { text: `${aAddr} hi` })).failed);
+  await b.close();
+  const gone = await a.tool('to', { text: `${bAddr} still there?` });
+  check('a session that is not open is said to be', gone.failed && gone.text.includes('is not online'), gone);
+  await a.close();
+}
+
 const cloudIssuer = newIdentity('Test cloud');
 const unix = () => Math.floor(Date.now() / 1000);
 type Account = { sub: string; domain: string | null; banned?: boolean; lifetime?: number };
@@ -534,7 +563,7 @@ async function accounts() {
   const nedAddr = addressIn((await ned.tool('setup', { name: 'Ned' })).text);
   const key = (root: string, addr: string) => readJson<Identity>(join(base, root, 'ids', addr), 'identity.json').publicKey;
   const refused = await mia.tool('list_agents');
-  check('a name no account owns is refused, and list_agents gives the link to open', refused.text.includes('Not connected to the relay: this relay needs a parley account') && refused.text.includes('Ask your user to open this link') && refused.text.includes(`${stub.url}/link?`), refused);
+  check('a name no account owns is refused, and list_agents gives the link to open', refused.text.includes('Not connected to the relay: this relay needs a parley account') && refused.text.includes('Open this link and sign in') && refused.text.includes(`${stub.url}/link?`), refused);
   const out = cli(join(base, 'machine-m'), 'cloud', 'link', '--url', stub.url);
   const machineM = readJson<Identity>(join(base, 'machine-m'), 'machine.json');
   const shownLink = new URL(/http\S+\/link\?\S+/.exec(refused.text)?.[0] ?? 'http://none');
@@ -897,6 +926,7 @@ try {
   await olderNode();
   await olderVersion();
   await manySenders();
+  await oneLine();
   await accountRelays();
   await accounts();
   await linkedMachine();

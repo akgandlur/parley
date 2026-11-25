@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { verifiedText, type People } from './account';
 import { startAgent, type Agent, type Incoming } from './agent';
+import { isAddress, normalizeAddress } from './crypto';
 import {
   addressFor,
   callable,
@@ -163,8 +164,10 @@ export async function runMcp() {
         name: z.string().trim().min(1).max(NAME_MAX).optional().describe("The name others will see; this session's Claude Code name if left out"),
       },
     },
-    ({ name: given }) =>
-      reply(async () => {
+    ({ name: given }) => reply(() => takeName(given)),
+  );
+
+  async function takeName(given: string | undefined): Promise<string> {
         const name = given ?? myName();
         if (!name) throw new Error('this Claude Code session has no session name to take; give a name');
         const existing = locals().find((l) => sameName(l.name, name));
@@ -187,6 +190,102 @@ export async function runMcp() {
         const made = setUp(name, relay);
         await become(made);
         return `This session is now "${made.name}", a new name. Its id is ${made.address}. Give this id to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
+  }
+
+  type Row = { name: string; address: string; open?: boolean; note?: string };
+
+  // Whom this session can message, open sessions first in each group.
+  async function roster(a: Agent) {
+    const self = a.address;
+    const contacts = loadContacts();
+    const here: Row[] = locals().filter((l) => l.address !== self).map((l) => ({ name: l.name, address: l.address, open: holder(l.address) !== undefined }));
+    const others = Object.keys(contacts).filter((id) => id !== self && !here.some((l) => l.address === id));
+    let asked: People | undefined;
+    let failed: string | undefined;
+    try {
+      asked = await a.account.people(others);
+    } catch (err) {
+      failed = err instanceof Error ? err.message : String(err);
+    }
+    const open = asked?.online && new Set(asked.online);
+    const openFirst = (list: Row[]) => [...list].sort((x, y) => Number(y.open ?? false) - Number(x.open ?? false));
+    const mine = openFirst(
+      (asked?.mine ?? []).filter((m) => !here.some((l) => l.address === m.address)).map((m) => ({ name: m.name, address: m.address, open: open?.has(m.address), note: m.machine && `on ${m.machine}` })),
+    );
+    accountNames = mine.map(({ name, address }) => ({ name, address }));
+    const met = openFirst(
+      others.filter((id) => !mine.some((m) => m.address === id)).map((id) => ({ name: contacts[id]!.name, address: id, open: open?.has(id), note: `first heard ${contacts[id]!.firstSeen.slice(0, 10)}` })),
+    );
+    const row = (r: Row) => `  "${r.name}" (${r.address}): ${[r.open === undefined ? undefined : r.open ? 'open now' : 'not open', r.note].filter(Boolean).join(', ')}`;
+    const lines: string[] = [];
+    if (failed) lines.push(`Could not ask which sessions are open: ${failed}.`);
+    if (mine.length) lines.push('', 'Your sessions on other machines:', ...mine.map(row));
+    if (met.length) lines.push('', 'Sessions you have exchanged a message with:', ...met.map(row));
+    return { mine, met, here, lines, hereLines: here.length ? ['', 'On this machine, reached with SendMessage, not parley:', ...here.map(row)] : [] };
+  }
+
+  const linkText = (url: string | undefined, link: string) =>
+    [`This machine is not linked to a parley account yet, so it cannot send or receive. Open this link and sign in at ${url} when it asks; it works for 15 minutes, and is needed once per machine:`, link].join('\n');
+
+  server.registerTool(
+    'to',
+    {
+      description:
+        'What the /parley:to command runs, in one call: it gives this session a parley name if it has none, then sends, or says exactly what is missing. `text` is what the user typed after the command: nothing, or an id or name, or an id or name followed by the message. Tell the user what it returns and nothing else.',
+      inputSchema: { text: z.string().max(TEXT_MAX + 200).describe('What the user typed after /parley:to, unchanged') },
+    },
+    ({ text: typed }) =>
+      reply(async () => {
+        await starting;
+        if (!agent) {
+          if (!myName() && !locals().length) throw new Error('this Claude Code session has no name for parley to take. Ask the user what to call it, call setup with it, then call this tool again');
+          if (!myName()) throw new Error(unnamed());
+          await takeName(undefined);
+        }
+        const a = agent as Agent;
+        for (let i = 0; i < 20 && !a.state().relay.connected && !a.state().account.link && !a.state().account.error; i++) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        const s = a.state();
+        if (s.account.link) return `${linkText(s.account.url, s.account.link)}\nOnce that is done, the user runs /parley:to again.`;
+        if (!s.relay.connected) throw new Error(`parley is not connected, so nothing can be sent: ${s.account.error ?? s.relay.error}`);
+
+        const r = await roster(a);
+        const input = typed.trim();
+        const [first = ''] = input.split(/\s+/);
+        let who: Row | undefined;
+        let message = '';
+        if (isAddress(first)) {
+          const address = normalizeAddress(first);
+          if (address === s.address) throw new Error(`${address} is this session's own id`);
+          who = [...r.mine, ...r.met, ...r.here].find((x) => x.address === address) ?? { name: address, address };
+          message = input.slice(first.length).trim();
+        } else if (input) {
+          const fits = [...r.mine, ...r.met, ...r.here]
+            .filter((x) => input.toLowerCase() === x.name.toLowerCase() || input.toLowerCase().startsWith(`${x.name.toLowerCase()} `))
+            .sort((x, y) => y.name.length - x.name.length);
+          const best = fits.filter((x) => x.name.length === fits[0]?.name.length);
+          if (best.length > 1) return [`More than one session is named "${best[0]!.name}". Ask the user which id they mean:`, ...best.map((x) => `  ${x.address}`)].join('\n');
+          who = best[0];
+          if (who) message = input.slice(who.name.length).trim();
+        }
+        if (!who) {
+          const head = input ? `Nobody this session can message is named like "${first}".` : undefined;
+          if (!r.mine.length && !r.met.length) {
+            return [
+              head,
+              `This session has nobody to message yet. Ask the user for the parley id of the session they want to reach (nine letters like kfq-mxa-tzp; the other person gets it by running /parley:to in their Claude Code), and what to tell it.`,
+              `For someone to reach this session instead, the user sends them its id: ${s.address}`,
+              ...r.lines,
+            ].filter((l) => l !== undefined).join('\n');
+          }
+          return [head, 'Ask the user who to message, by name or id, and what to say. They can also give an id that is not listed.', ...r.lines, '', `This session is "${s.name}" (${s.address}).`].filter((l) => l !== undefined).join('\n');
+        }
+        const label = who.name === who.address ? who.address : `"${who.name}" (${who.address})`;
+        if (r.here.includes(who)) return `${label} is a session on this machine, which parley is not for. Send it with SendMessage instead.`;
+        if (!message) return `${label}${who.open === false ? ' is not open right now, so a message would not arrive; nothing is kept for later.' : ' can be messaged.'} Ask the user what to tell it, then call this tool again with "${who.address}" followed by the message.`;
+        const name = await a.send(who.address, message);
+        return `Delivered to "${name}" (${who.address}).`;
       }),
   );
 
@@ -205,39 +304,13 @@ export async function runMcp() {
           s.relay.connected ? 'Connected to the relay.' : `Not connected to the relay: ${s.relay.error}.`,
         ];
         if (s.account.link) {
-          lines.push(
-            `This machine is not linked to a parley account yet, so the relay will not let its sessions on. Ask your user to open this link while signed in to ${s.account.url}; it works for 15 minutes, and is needed once per machine:`,
-            s.account.link,
-          );
+          lines.push(linkText(s.account.url, s.account.link));
         } else if (s.account.error) {
           lines.push(`Account: ${s.account.error}.`);
         }
-        const contacts = loadContacts();
-        const here = locals().filter((l) => l.address !== s.address);
-        const others = Object.keys(contacts).filter((id) => id !== s.address && !here.some((l) => l.address === id));
-        let asked: People | undefined;
-        try {
-          asked = await a.account.people(others);
-        } catch (err) {
-          lines.push(`Could not ask which sessions are open: ${err instanceof Error ? err.message : err}.`);
-        }
-        const mine = (asked?.mine ?? []).filter((m) => !here.some((l) => l.address === m.address));
-        accountNames = mine.map(({ name, address }) => ({ name, address }));
-        const open = asked?.online && new Set(asked.online);
-        const state = (id: string) => (open ? (open.has(id) ? 'open now' : 'not open') : undefined);
-        const openFirst = <T extends { address: string }>(list: T[]) => [...list].sort((x, y) => Number(open?.has(y.address) ?? false) - Number(open?.has(x.address) ?? false));
-        const row = (name: string, id: string, ...facts: (string | undefined)[]) => `  "${name}" (${id}): ${facts.filter(Boolean).join(', ')}`;
-        if (mine.length) {
-          lines.push('', 'Your sessions on other machines:', ...openFirst(mine).map((m) => row(m.name, m.address, state(m.address), m.machine && `on ${m.machine}`)));
-        }
-        const met = openFirst(others.filter((id) => !mine.some((m) => m.address === id)).map((address) => ({ address })));
-        if (met.length) {
-          lines.push('', 'Sessions you have exchanged a message with:', ...met.map(({ address }) => row(contacts[address]!.name, address, state(address), `first heard ${contacts[address]!.firstSeen.slice(0, 10)}`)));
-        }
-        if (here.length) {
-          lines.push('', 'On this machine, reached with SendMessage, not parley:', ...here.map((l) => row(l.name, l.address, holder(l.address) ? 'open now' : 'not open')));
-        }
-        if (!mine.length && !met.length) lines.push('', 'Nobody to message by name yet. Message an id to start.');
+        const r = await roster(a);
+        lines.push(...r.lines, ...r.hereLines);
+        if (!r.mine.length && !r.met.length) lines.push('', 'Nobody to message by name yet. Message an id to start.');
         return lines.join('\n');
       }),
   );

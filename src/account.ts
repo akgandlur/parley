@@ -71,10 +71,14 @@ export function startAccount(
   const saved = existsSync(join(home, 'cloud.json'))
     ? readJson<{ url: string | null }>(home, 'cloud.json').url
     : undefined;
-  let url = saved === null ? undefined : (saved ?? (attest ? undefined : process.env.PARLEY_CLOUD));
-  if (url && saved === undefined) {
-    url = originOf(url);
+  // The plugin sets PARLEY_CLOUD, and it wins over the saved address so a
+  // plugin update can move everyone to a new one. A proof from the old
+  // address is of no use at the new.
+  let url = saved === null ? undefined : (process.env.PARLEY_CLOUD ?? saved);
+  if (url) url = originOf(url);
+  if (url && url !== saved) {
     writeJson(home, 'cloud.json', { url });
+    if (saved) attest = undefined;
   }
   let refusal: 'not linked' | 'banned' | undefined;
   let error: string | undefined;
