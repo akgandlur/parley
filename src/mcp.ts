@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { verifiedText } from './account';
+import { verifiedText, type People } from './account';
 import { startAgent, type Agent, type Incoming } from './agent';
 import {
   addressFor,
@@ -90,6 +90,7 @@ export async function runMcp() {
   let held: Local | undefined;
   let starting: Promise<void> | undefined;
   const unread: string[] = [];
+  let accountNames: { name: string; address: string }[] = [];
 
   const waiting: Incoming[] = [];
   let holdUntil = 0;
@@ -193,7 +194,7 @@ export async function runMcp() {
     'list_agents',
     {
       description:
-        "Show this session's parley name and id, whether it is connected, and the names you can message: everyone you have exchanged a message with, and other parley names on this machine. If this machine is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses its sessions until then.",
+        "Show this session's parley name and id, whether it is connected, and the names you can message: your account's sessions on other machines and everyone you have exchanged a message with, each marked open now or not. If this machine is not linked to a parley account yet, it shows the link your user has to open; the hosted relay refuses its sessions until then.",
     },
     () =>
       named(async (a) => {
@@ -212,12 +213,31 @@ export async function runMcp() {
           lines.push(`Account: ${s.account.error}.`);
         }
         const contacts = loadContacts();
-        const names = callable(s.address).map((n) => {
-          const local = locals().some((l) => l.address === n.address);
-          const where = local ? (holder(n.address) ? 'this machine, open' : 'this machine, not open') : `first heard ${contacts[n.address]?.firstSeen.slice(0, 10)}`;
-          return `  "${n.name}" (${n.address}): ${where}`;
-        });
-        lines.push('', names.length ? 'Names you can message:' : 'No other names yet. Message an id to start.', ...names);
+        const here = locals().filter((l) => l.address !== s.address);
+        const others = Object.keys(contacts).filter((id) => id !== s.address && !here.some((l) => l.address === id));
+        let asked: People | undefined;
+        try {
+          asked = await a.account.people(others);
+        } catch (err) {
+          lines.push(`Could not ask which sessions are open: ${err instanceof Error ? err.message : err}.`);
+        }
+        const mine = (asked?.mine ?? []).filter((m) => !here.some((l) => l.address === m.address));
+        accountNames = mine.map(({ name, address }) => ({ name, address }));
+        const open = asked?.online && new Set(asked.online);
+        const state = (id: string) => (open ? (open.has(id) ? 'open now' : 'not open') : undefined);
+        const openFirst = <T extends { address: string }>(list: T[]) => [...list].sort((x, y) => Number(open?.has(y.address) ?? false) - Number(open?.has(x.address) ?? false));
+        const row = (name: string, id: string, ...facts: (string | undefined)[]) => `  "${name}" (${id}): ${facts.filter(Boolean).join(', ')}`;
+        if (mine.length) {
+          lines.push('', 'Your sessions on other machines:', ...openFirst(mine).map((m) => row(m.name, m.address, state(m.address), m.machine && `on ${m.machine}`)));
+        }
+        const met = openFirst(others.filter((id) => !mine.some((m) => m.address === id)).map((address) => ({ address })));
+        if (met.length) {
+          lines.push('', 'Sessions you have exchanged a message with:', ...met.map(({ address }) => row(contacts[address]!.name, address, state(address), `first heard ${contacts[address]!.firstSeen.slice(0, 10)}`)));
+        }
+        if (here.length) {
+          lines.push('', 'On this machine, reached with SendMessage, not parley:', ...here.map((l) => row(l.name, l.address, holder(l.address) ? 'open now' : 'not open')));
+        }
+        if (!mine.length && !met.length) lines.push('', 'Nobody to message by name yet. Message an id to start.');
         return lines.join('\n');
       }),
   );
@@ -238,7 +258,7 @@ export async function runMcp() {
     },
     ({ to, message, urgent }) =>
       named(async (a) => {
-        const address = addressFor(to, a.address);
+        const address = addressFor(to, a.address, accountNames);
         const name = await a.send(address, message, urgent === true);
         return `Delivered to "${name}" (${address}).`;
       }),
@@ -253,7 +273,7 @@ export async function runMcp() {
     },
     ({ with: who }) =>
       named(async (a) => {
-        const address = addressFor(who, a.address);
+        const address = addressFor(who, a.address, accountNames);
         return `Safety number with ${address}: ${a.safetyNumber(address)}\nIt is the same on their side if nobody is in the middle. Your user compares it with the other person over a call or in person.`;
       }),
   );

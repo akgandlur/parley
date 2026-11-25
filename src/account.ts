@@ -15,6 +15,8 @@ const UNLINKED_CHECK_MS = 30_000;
 
 export type AttestFile = { att: string; issuer: string; sync?: boolean; fetchedAt: string };
 export type Verified = { domain: string | null; kind: 'account' | 'visitor' };
+export type People = { mine: { address: string; name: string; machine?: string }[]; online?: string[] };
+
 export type AccountState = { url?: string; link?: string; error?: string; verified?: Verified };
 
 export const verifiedText = (v: Verified | undefined) =>
@@ -147,8 +149,30 @@ export function startAccount(
 
   void check();
 
+  // The other sessions of this account, and which of them and of `ids` are open now.
+  async function people(ids: string[]): Promise<People | undefined> {
+    if (!url || !attest) return undefined;
+    const body = JSON.stringify({ ids });
+    const time = new Date().toISOString();
+    const res = await fetch(`${url}/api/people`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-parley-key': me.publicKey,
+        'x-parley-time': time,
+        'x-parley-sig': signText(me, `parley-cloud-people\n${time}\n${createHash('sha256').update(body).digest('hex')}`),
+      },
+      body,
+      signal: AbortSignal.timeout(5000),
+    });
+    const reply = (await res.json().catch(() => ({}))) as Partial<People> & { error?: string };
+    if (!res.ok || !Array.isArray(reply.mine)) throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    return { mine: reply.mine, online: reply.online };
+  }
+
   return {
     check,
+    people,
     // For a listing asked while the name waits on its person to link it.
     recheck: () => (Date.now() - lastCheck < 2000 ? Promise.resolve() : check()),
     att: () => attest?.att,

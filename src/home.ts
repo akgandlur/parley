@@ -107,19 +107,22 @@ export function isSavedKey(address: string, key: string): boolean {
   return saved === undefined || saved === key;
 }
 
-export function callable(self: string): { name: string; address: string }[] {
+type Named = { name: string; address: string };
+
+// `also` is what the account's other sessions are called, which no file here holds.
+export function callable(self: string, also: Named[] = []): Named[] {
   const here = locals().map(({ name, address }) => ({ name, address }));
-  const known = Object.entries(loadContacts())
-    .filter(([address]) => !here.some((l) => l.address === address))
-    .map(([address, c]) => ({ name: c.name, address }));
-  return [...here, ...known].filter((k) => k.address !== self);
+  const known = Object.entries(loadContacts()).map(([address, c]) => ({ name: c.name, address }));
+  const all: Named[] = [];
+  for (const n of [...here, ...known, ...also]) if (n.address !== self && !all.some((a) => a.address === n.address)) all.push(n);
+  return all;
 }
 
 // Anything shaped like an id is one, whatever a contact has named itself:
 // a name must never be able to stand in for someone else's id.
-export function addressFor(to: string, self: string): string {
+export function addressFor(to: string, self: string, also: Named[] = []): string {
   if (isAddress(to)) return normalizeAddress(to);
-  const names = callable(self);
+  const names = callable(self, also);
   const hits = names.filter((n) => sameName(n.name, to));
   const [only] = hits;
   if (only && hits.length === 1) return only.address;

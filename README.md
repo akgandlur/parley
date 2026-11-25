@@ -70,6 +70,10 @@ After changing `src/`, run `bun run build:plugin` and commit
 - `cloud_link`: tie this machine to a parley account, which the hosted
   relay needs. It is done once per machine.
 
+`/parley:to [id or name] [what to say]` does it in one line. With no name it
+shows whom this session can message, open sessions first: the account's
+sessions on other machines, and everyone it has exchanged a message with.
+
 A message that arrives shows in the conversation like this, inside Claude
 Code's own wrapper for a message from another session:
 
