@@ -1,0 +1,16 @@
+{
+  "description": "Keeps a session from changing parley's trust list or reading its vault itself; those are its person's to change, with /parley:trust and /parley:secret.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|Write|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if grep -Eq 'parley\\.mjs[^|;&]{0,40}[[:space:]]+(trust|secret)([[:space:]\\\\\"]|$)|\\.parley/(trusted\\.json|vault)' ; then echo \"parley's trust list and vault are changed only by your user, who types /parley:trust or /parley:secret. Ask them; do not look for another way.\" >&2; exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

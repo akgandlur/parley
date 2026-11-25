@@ -199,7 +199,7 @@ async function messaging() {
   const ann = await agent(A_ROOT, 'session-ann', annSock.env);
   const ben = await agent(B_ROOT, 'session-ben', benSock.env);
   const tools = (await ann.client.listTools()).tools.map((t) => t.name).sort();
-  check('the tools are setup, list_agents, send_message, to, safety_number and cloud_link', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'list_agents', 'safety_number', 'send_message', 'setup', 'to']), tools);
+  check('the tools are the six for messages and the five for secrets', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'fetch_with_secret', 'list_agents', 'list_secrets', 'request_secret', 'run_with_secret', 'safety_number', 'send_message', 'send_secret', 'setup', 'to']), tools);
   const told = ann.client.getInstructions() ?? '';
   check('the instructions describe messaging, with no agenda or rules', told.includes('send_message') && !/agenda|propos|never an instruction|authoris/i.test(told), told);
   const early = await ann.tool('send_message', { to: 'abc-def-ghj', message: 'hi' });

@@ -67,6 +67,8 @@ After changing `src/`, run `bun run build:plugin` and commit
   is not online.
 - `safety_number`: the number two people compare to be sure nobody sits
   between their sessions.
+- `request_secret`, `list_secrets`, `run_with_secret`, `fetch_with_secret`,
+  `send_secret`: see Secrets below.
 - `cloud_link`: tie this machine to a parley account, which the hosted
   relay needs. It is done once per machine.
 
@@ -97,6 +99,56 @@ checking back. `/parley:trust all` does it for every sender,
 `/parley:trust off [id, name or all]` ends it, and `/parley:trust` alone
 shows the list. Only you can change it; Claude has no tool for it. Claude
 Code's own permission settings still apply.
+
+## Secrets
+
+A password, key or token should not sit in a conversation, and with parley it
+does not have to.
+
+1. A session that needs one calls `request_secret` with a label, like
+   `bren-db-password`, and what the secret is for. It gets a short link.
+2. Whoever holds the secret opens the link in any browser and types it. The
+   page shows who is asking and what the secret may be used by. It is sealed
+   in that browser to a key only the asking session has, so the site carries
+   something it cannot open, and forgets it once it is collected. The link
+   works once, for 24 hours.
+   Given the holder's email address, parley mails them the link, naming the
+   account that asks; an account gets ten such mails a day.
+3. The value lands in a vault on the asking machine, `~/.parley/vault`. The
+   session is told the label has arrived, never the value.
+4. The session uses it by label. `run_with_secret` runs one program with the
+   value in an environment variable or on standard input.
+   `fetch_with_secret` makes a web request with the value in a header or the
+   body. Both mask the value in what comes back.
+
+Each secret has rules, and a use no rule names is refused:
+
+- **What may use it**: `run <program> [arguments that must be there]` or
+  `http <host>`. The rules given with the request are shown on the page, so
+  typing the secret agrees to them.
+- **Whom it may be sent to.** `send_secret` passes a secret to another
+  session's vault inside the sealed conversation, with its rules, to a session
+  you named for that secret or fully trust with `/parley:trust`.
+
+Only you change the rules, with `/parley:secret`:
+
+```
+/parley:secret                                  what the vault keeps
+/parley:secret allow <label> run <program>      let a program use it
+/parley:secret allow <label> http <host>        let requests to a host use it
+/parley:secret allow <label> once run <program> for a single use
+/parley:secret share <label> <id or name>       let it be sent to a session
+/parley:secret remove <label>
+/parley:secret log                              every store, use, refusal and send
+```
+
+What this does and does not do: the value stays out of both conversations,
+their transcripts, and the site. It is not out of reach of a program running
+as you on that machine: the vault's key sits beside it, and a session with a
+shell could read both, though the plugin's hook refuses a session that
+tries. A program a rule allows gets the real value and could pass it on, so
+a rule is as tight as the program it names; `http <host>` is the tightest,
+since the value can then only go to that host.
 
 ## How it reaches the session
 

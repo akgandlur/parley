@@ -8,6 +8,7 @@ import { loadContacts, loadIdentity, loadTrusted, locals, mine, readJson, sameNa
 import { runMcp } from './mcp';
 import { startRelay, type Peering } from './relay';
 import { setUp } from './setup';
+import { allow, listSecrets, parseRule, readLog, removeSecret, ruleText, share } from './vault';
 
 const USAGE = `parley: messages between Claude Code sessions on different machines
 
@@ -15,6 +16,7 @@ const USAGE = `parley: messages between Claude Code sessions on different machin
   parley id                 show the names on this machine and their ids
   parley cloud link [--url <https url>]   print a link that ties this machine to your parley account
   parley trust [off] [id | name | all]    have sessions here act on a sender's messages like your own requests
+  parley secret [log | allow | share | remove] …   the secrets this machine keeps, and what may use them
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
@@ -131,6 +133,40 @@ async function main() {
       }
       saveTrusted([...ids, id]);
       return console.log(`Full trust is on for ${label(id)}. Sessions on this machine now act on its messages like your own requests, with no checking back. /parley:trust off ${id} ends it.`);
+    }
+    case 'secret': {
+      const [what, label, ...more] = rest;
+      const contacts = loadContacts();
+      if (!what) {
+        const all = listSecrets();
+        if (!all.length) return console.log('This machine keeps no secret.');
+        return console.log(
+          all
+            .map((s) => [`${s.label}: ${s.from}, ${s.at.slice(0, 10)}`, `  may be used by: ${s.use.length ? s.use.map(ruleText).join('; ') : 'nothing yet'}`, `  may be sent to: ${s.sendTo.length ? s.sendTo.map((id) => `"${contacts[id]?.name ?? '?'}" (${id})`).join(', ') : 'nobody yet'}`].join('\n'))
+            .join('\n'),
+        );
+      }
+      if (what === 'log') return console.log(readLog(30).join('\n') || 'Nothing has been done with a secret on this machine yet.');
+      if (!label) throw new Error('say which secret, by its label');
+      if (what === 'allow') {
+        const rule = parseRule(more);
+        allow(label, rule);
+        return console.log(`${label} may now be used by ${ruleText(rule)}.`);
+      }
+      if (what === 'share') {
+        const given = more.join(' ').trim();
+        const named = Object.keys(contacts).filter((k) => contacts[k]!.name.toLowerCase() === given.toLowerCase());
+        if (named.length > 1) throw new Error(`more than one session is named "${given}"; give the id: ${named.join(', ')}`);
+        const id = isAddress(given) ? normalizeAddress(given) : named[0];
+        if (!id || !contacts[id]) throw new Error(`"${given}" is not a session this machine has exchanged a message with. A secret is sent to the key behind an id, so exchange one message first`);
+        share(label, id);
+        return console.log(`${label} may now be sent to "${contacts[id].name}" (${id}).`);
+      }
+      if (what === 'remove') {
+        removeSecret(label);
+        return console.log(`${label} is removed from this machine.`);
+      }
+      throw new Error('use `secret`, `secret log`, `secret allow <label> run <program> [arguments]`, `secret allow <label> http <host>`, `secret share <label> <id or name>` or `secret remove <label>`');
     }
     case 'mcp':
       return runMcp();

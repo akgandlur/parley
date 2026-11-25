@@ -6977,8 +6977,8 @@ var require_dist = __commonJS(function(exports, module) {
 
 // src/cli.ts
 import { resolve6 } from "dns/promises";
-import { existsSync as existsSync5 } from "fs";
-import { join as join8 } from "path";
+import { existsSync as existsSync8 } from "fs";
+import { join as join11 } from "path";
 
 // src/crypto.ts
 import {
@@ -22224,10 +22224,10 @@ ${createHash2("sha256").update(body).digest("hex")}`)
 }
 
 // src/agent.ts
-import { randomBytes } from "node:crypto";
-import { existsSync as existsSync4, rmSync as rmSync2 } from "node:fs";
+import { randomBytes as randomBytes2 } from "node:crypto";
+import { existsSync as existsSync6, rmSync as rmSync2 } from "node:fs";
 import { connect } from "node:net";
-import { join as join4 } from "node:path";
+import { join as join6 } from "node:path";
 
 // src/ratchet.ts
 import {
@@ -22385,8 +22385,285 @@ var MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
 var TALK_KEEP_MS = 7 * 24 * 3600000;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
+// src/secrets.ts
+import { createHash as createHash4, webcrypto } from "node:crypto";
+import { existsSync as existsSync5 } from "node:fs";
+import { join as join5 } from "node:path";
+
+// src/vault.ts
+import { spawn } from "node:child_process";
+import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv2, randomBytes } from "node:crypto";
+import { appendFileSync, chmodSync as chmodSync3, existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync3 } from "node:fs";
+import { basename, join as join4 } from "node:path";
+var DIR = join4(ROOT, "vault");
+var RUN_MS = 120000;
+var OUT_MAX = 60000;
+var LABEL = /^[a-z0-9][a-z0-9._-]{0,59}$/;
+function checkLabel(label) {
+  if (!LABEL.test(label)) {
+    throw new Error(`a secret's label is lower-case letters, digits, dots and hyphens, like bren-db-password; "${label.slice(0, 80)}" is not`);
+  }
+  return label;
+}
+function parseRule(words) {
+  const once = words[0] === "once";
+  const [kind, target, ...args] = once ? words.slice(1) : words;
+  if (kind === "run" && target)
+    return { run: target, args, ...once && { once } };
+  if (kind === "http" && target && !args.length && /^[a-z0-9.-]+(:\d+)?$/i.test(target))
+    return { http: target.toLowerCase(), ...once && { once } };
+  throw new Error("a rule is `run <program> [arguments that must be there]` or `http <host>`, with `once` in front for a single use");
+}
+var ruleText = (r) => ("run" in r ? `the program ${r.run}${r.args.length ? `, with ${r.args.join(" ")} among its arguments` : ""}` : `web requests to ${r.http}`) + (r.once ? ", once" : "");
+var all = () => existsSync4(join4(DIR, "secrets.json")) ? readJson(DIR, "secrets.json") : {};
+var save = (entries) => writeJson(DIR, "secrets.json", entries, true);
+function key() {
+  if (!existsSync4(join4(DIR, "key.json")))
+    writeJson(DIR, "key.json", { key: randomBytes(32).toString("base64") }, true);
+  return Buffer.from(readJson(DIR, "key.json").key, "base64");
+}
+function note(what, label, detail) {
+  mkdirSync3(DIR, { recursive: true, mode: 448 });
+  const path = join4(DIR, "log.jsonl");
+  appendFileSync(path, JSON.stringify({ at: new Date().toISOString(), what, label, detail }) + `
+`);
+  chmodSync3(path, 384);
+}
+var listSecrets = () => Object.entries(all()).map(([label, e]) => ({ label, from: e.from, at: e.at, sendTo: e.sendTo, use: e.use }));
+function putSecret(label, value, from, use) {
+  checkLabel(label);
+  if (!value)
+    throw new Error("an empty secret is not kept");
+  const entries = all();
+  const had = entries[label];
+  if (had && had.from !== from)
+    throw new Error(`this machine already keeps a secret labelled ${label}, from ${had.from}. Its person removes it first with /parley:secret remove ${label}, or another label is used`);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv3("aes-256-gcm", key(), iv);
+  const ct = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  entries[label] = { iv: iv.toString("base64"), ct: ct.toString("base64"), tag: cipher.getAuthTag().toString("base64"), from, at: new Date().toISOString(), sendTo: had?.sendTo ?? [], use: had ? had.use : use };
+  save(entries);
+  note("stored", label, `from ${from}`);
+}
+function entryOf(label) {
+  const e = all()[checkLabel(label)];
+  if (!e)
+    throw new Error(`this machine keeps no secret labelled ${label}. list_secrets shows the ones it has`);
+  return e;
+}
+function valueOf(e) {
+  const d = createDecipheriv2("aes-256-gcm", key(), Buffer.from(e.iv, "base64"));
+  d.setAuthTag(Buffer.from(e.tag, "base64"));
+  return Buffer.concat([d.update(Buffer.from(e.ct, "base64")), d.final()]).toString("utf8");
+}
+function change(label, fn) {
+  const entries = all();
+  const e = entries[checkLabel(label)];
+  if (!e)
+    throw new Error(`this machine keeps no secret labelled ${label}`);
+  fn(e);
+  save(entries);
+}
+function takeForSending(label, to, trusted) {
+  const e = entryOf(label);
+  if (!trusted && !e.sendTo.includes(to)) {
+    note("refused", label, `sending to ${to}`);
+    throw new Error(`the secret ${label} may not be sent to ${to}. Only your user can allow it, by typing /parley:secret share ${label} ${to}. Ask them; do not look for another way to pass it on`);
+  }
+  return { value: valueOf(e), use: e.use.filter((r) => !r.once) };
+}
+function mask(text, value) {
+  const forms = new Set([value, encodeURIComponent(value), Buffer.from(value).toString("base64"), Buffer.from(value).toString("base64url"), Buffer.from(value).toString("hex")]);
+  let out = text;
+  for (const f of [...forms].sort((a, b) => b.length - a.length))
+    if (f)
+      out = out.split(f).join("[secret]");
+  return out;
+}
+function spend(label, rule) {
+  if (rule.once) {
+    change(label, (e) => {
+      e.use = e.use.filter((r) => JSON.stringify(r) !== JSON.stringify(rule));
+    });
+  }
+}
+var refusal = (label, what, grant) => `the secret ${label} may not be used for ${what}. ${listRules(label)} Only your user can allow more, by typing /parley:secret allow ${label} ${grant}. Ask them; do not look for another way to use it`;
+function listRules(label) {
+  const { use } = entryOf(label);
+  return use.length ? `It may be used by: ${use.map(ruleText).join("; ")}.` : "It has no rule yet that lets anything use it.";
+}
+async function runWith(label, argv, how, cwd, by) {
+  const e = entryOf(label);
+  const [program, ...args] = argv;
+  if (!program)
+    throw new Error("give the command as a list: the program, then its arguments");
+  const rule = e.use.find((r) => ("run" in r) && (r.run === program || r.run === basename(program)) && r.args.every((a) => args.includes(a)));
+  const shown = argv.join(" ").slice(0, 300);
+  if (!rule) {
+    note("refused", label, `${by}: ${shown}`);
+    throw new Error(refusal(label, `the command ${shown}`, `run ${basename(program)}`));
+  }
+  if (how !== "stdin" && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(how.env))
+    throw new Error("an environment variable name is letters, digits and underscores");
+  const value = valueOf(e);
+  spend(label, rule);
+  note("used", label, `${by}: ${shown}`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, args, { cwd, env: how === "stdin" ? process.env : { ...process.env, [how.env]: value }, stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => out = (out + d).slice(0, OUT_MAX));
+    child.stderr.on("data", (d) => err = (err + d).slice(0, OUT_MAX));
+    const timer = setTimeout(() => child.kill("SIGKILL"), RUN_MS);
+    child.on("error", (problem) => {
+      clearTimeout(timer);
+      reject(new Error(mask(`could not run ${program}: ${problem.message}`, value)));
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolve(mask([`Exit ${code ?? signal}.`, out && `Output:
+${out.trimEnd()}`, err && `Errors:
+${err.trimEnd()}`].filter(Boolean).join(`
+
+`), value));
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(how === "stdin" ? value : undefined);
+  });
+}
+var LOCAL = /^(localhost|127\.0\.0\.1)(:\d+)?$/;
+async function fetchWith(label, req, by) {
+  const e = entryOf(label);
+  const url = new URL(req.url);
+  const rule = e.use.find((r) => ("http" in r) && r.http === url.host.toLowerCase());
+  const shown = `${req.method ?? "GET"} ${url.origin}${url.pathname}`;
+  if (!rule) {
+    note("refused", label, `${by}: ${shown}`);
+    throw new Error(refusal(label, `a request to ${url.host}`, `http ${url.host}`));
+  }
+  if (url.protocol !== "https:" && !LOCAL.test(url.host))
+    throw new Error("a secret goes out over https only");
+  const value = valueOf(e);
+  const fill = (s) => s.replace(/\{\{secret\}\}/g, value).replace(/\{\{basic:([^}]*)\}\}/g, (_, user) => Buffer.from(`${user}:${value}`).toString("base64"));
+  spend(label, rule);
+  note("used", label, `${by}: ${shown}`);
+  const res = await fetch(url, {
+    method: req.method ?? "GET",
+    headers: Object.fromEntries(Object.entries(req.headers ?? {}).map(([k, v]) => [k, fill(v)])),
+    body: req.body === undefined ? undefined : fill(req.body),
+    redirect: "manual",
+    signal: AbortSignal.timeout(60000)
+  });
+  const text = (await res.text()).slice(0, OUT_MAX);
+  const to = res.headers.get("location");
+  return mask([`Status ${res.status}.`, to && `It redirects to ${to}, which was not followed.`, res.headers.get("content-type") && `Type: ${res.headers.get("content-type")}`, text && `Body:
+${text}`].filter(Boolean).join(`
+`), value);
+}
+
+// src/secrets.ts
+var FAST_MS = 4000;
+var SLOW_MS = 60000;
+var FAST_FOR_MS = 30 * 60000;
+var subtle = webcrypto.subtle;
+var b64 = (s) => Buffer.from(s, "base64url");
+var secretArrived = (label, how, use) => [
+  `parley: a secret labelled ${label} is now in this machine's vault (${how}). Its value is not shown to you and you have no need of it.`,
+  use.length ? `It may be used by: ${use.map(ruleText).join("; ")}.` : `It has no rule yet that lets anything use it: your user allows a use by typing /parley:secret allow ${label} run <program>, or http <host>.`,
+  "Use it with run_with_secret or fetch_with_secret, by its label."
+].join(" ");
+function startRequests(home, me, cloud, log, notice) {
+  const load = () => existsSync5(join5(home, "requests.json")) ? readJson(home, "requests.json") : {};
+  const save = (all) => writeJson(home, "requests.json", all, true);
+  async function call(path, body) {
+    const url = cloud();
+    if (!url)
+      throw new Error("this session has no parley account address, which asking for a secret needs");
+    const text = JSON.stringify(body);
+    const time = new Date().toISOString();
+    const res = await fetch(`${url}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-parley-key": me.publicKey,
+        "x-parley-time": time,
+        "x-parley-sig": signText(me, `parley-cloud-secret
+${time}
+${createHash4("sha256").update(text).digest("hex")}`)
+      },
+      body: text,
+      signal: AbortSignal.timeout(1e4)
+    });
+    const reply = await res.json().catch(() => ({}));
+    if (!res.ok)
+      throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    return reply;
+  }
+  async function opened(code, p, box) {
+    const mine = await subtle.importKey("jwk", p.key, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+    const theirs = await subtle.importKey("raw", b64(box.epk), { name: "ECDH", namedCurve: "P-256" }, false, []);
+    const shared = await subtle.deriveBits({ name: "ECDH", public: theirs }, mine, 256);
+    const hkdf = await subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]);
+    const aes = await subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: new TextEncoder().encode(`parley-secret
+${code}`) }, hkdf, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const plain = await subtle.decrypt({ name: "AES-GCM", iv: b64(box.iv), additionalData: new TextEncoder().encode(p.label) }, aes, b64(box.ct));
+    return new TextDecoder().decode(plain);
+  }
+  let busy = false;
+  let last = 0;
+  async function collect() {
+    const all = load();
+    const codes = Object.keys(all);
+    if (!codes.length || busy)
+      return;
+    const newest = Math.max(...codes.map((c) => Date.parse(all[c].askedAt)));
+    if (Date.now() - last < (Date.now() - newest < FAST_FOR_MS ? FAST_MS : SLOW_MS))
+      return;
+    busy = true;
+    last = Date.now();
+    try {
+      const got = await call("/api/secrets/take", { codes });
+      for (const [code, box] of Object.entries(got.filled)) {
+        const p = all[code];
+        if (!p)
+          continue;
+        try {
+          putSecret(p.label, await opened(code, p, box), `typed at ${p.link}`, p.use);
+          notice(secretArrived(p.label, `typed at ${p.link}`, p.use));
+        } catch (err) {
+          notice(`parley: what was typed at ${p.link} for the secret ${p.label} could not be kept: ${err instanceof Error ? err.message : err}`);
+        }
+        delete all[code];
+      }
+      for (const code of got.gone) {
+        if (all[code])
+          notice(`parley: the link ${all[code].link} for the secret ${all[code].label} ran out before anyone used it. Ask for it again with request_secret if it is still needed.`);
+        delete all[code];
+      }
+      const done = [...Object.keys(got.filled), ...got.gone];
+      if (done.length)
+        save(Object.fromEntries(Object.entries(load()).filter(([code]) => !done.includes(code))));
+    } catch (err) {
+      log("could not ask the cloud for typed secrets:", err instanceof Error ? err.message : err);
+    } finally {
+      busy = false;
+    }
+  }
+  setInterval(() => void collect(), 1000).unref();
+  return {
+    async request(label, use, note, email) {
+      checkLabel(label);
+      const pair = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+      const pub = Buffer.from(await subtle.exportKey("raw", pair.publicKey)).toString("base64url");
+      const made = await call("/api/secrets", { label, pub, use: use.map(ruleText), note, email });
+      save({ ...load(), [made.code]: { label, use, key: await subtle.exportKey("jwk", pair.privateKey), link: made.link, askedAt: new Date().toISOString(), expires: made.expires } });
+      return { link: made.link, hours: Math.round((Date.parse(made.expires) - Date.now()) / 3600000), mailed: made.mailed };
+    }
+  };
+}
+
 // src/types.ts
-var VERSION = "0.9.7";
+var VERSION = "0.10.0";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -22406,7 +22683,7 @@ class Stale extends Error {
 }
 var explain = (err) => err instanceof Error ? err.message : String(err);
 async function retireOldNode(home, log) {
-  if (!existsSync4(join4(home, "node.json")))
+  if (!existsSync6(join6(home, "node.json")))
     return;
   const info = readJson(home, "node.json");
   await new Promise((resolve) => {
@@ -22417,14 +22694,14 @@ async function retireOldNode(home, log) {
     socket.on("close", () => resolve());
     socket.setTimeout(3000, () => socket.destroy());
   });
-  for (let i = 0;i < 30 && existsSync4(join4(home, "node.json")); i++) {
+  for (let i = 0;i < 30 && existsSync6(join6(home, "node.json")); i++) {
     await new Promise((r) => setTimeout(r, 100));
   }
-  if (existsSync4(join4(home, "node.json"))) {
+  if (existsSync6(join6(home, "node.json"))) {
     try {
       process.kill(info.pid, "SIGTERM");
     } catch {}
-    rmSync2(join4(home, "node.json"), { force: true });
+    rmSync2(join6(home, "node.json"), { force: true });
   }
   log(`stopped the older parley node (pid ${info.pid})`);
 }
@@ -22628,7 +22905,7 @@ async function startAgent(home, log, onMessage, onNotice) {
     if (!asked) {
       onNotice(`parley: ${from} tried to reach this session, but it is on a parley older than 0.9, which this one cannot talk with. Nothing it sent arrived. It has been sent a note saying it has to update.`);
     }
-    const id = randomBytes(9).toString("base64url");
+    const id = randomBytes2(9).toString("base64url");
     const text = `This is an automatic note from parley, not from the session itself. This session is on parley ${VERSION}, and yours is older than 0.9: the two cannot talk, so nothing you send here arrives. ${HOW_TO_UPDATE} From 0.9 on, each machine is linked once to a parley account.`;
     const { eph, box } = sealTo08(p.key, JSON.stringify({ id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
     relaySend(from, `note:${id}`, { v: 2, kind: "msg", key: me.publicKey, eph, box, sig: signText(me, `parley message
@@ -22684,7 +22961,26 @@ ${box}`) });
           return;
         acks.delete(String(inner.id));
         saveContact(from, String(inner.name), conv.key);
-        wait.resolve(String(inner.name));
+        if (inner.error)
+          wait.reject(new Error(`${from} did not take it: ${String(inner.error).slice(0, 500)}`));
+        else
+          wait.resolve(String(inner.name));
+      } else if (inner.t === "secret") {
+        const id = String(inner.id);
+        const who = `"${String(inner.name)}" (${from})`;
+        let error;
+        if (!seen.has(id)) {
+          seen.add(id);
+          saveContact(from, String(inner.name), conv.key);
+          try {
+            const use = (Array.isArray(inner.use) ? inner.use : []).map((r) => parseRule("run" in r ? ["run", String(r.run), ...r.args.map(String)] : ["http", String(r.http)]));
+            putSecret(String(inner.label), String(inner.value), who, use);
+            onNotice(secretArrived(String(inner.label), `${who} sent it`, use));
+          } catch (err) {
+            error = explain(err);
+          }
+        }
+        relaySend(from, `ack:${id}`, { v: 3, kind: "m", ...seal(conv.ratchet, JSON.stringify({ t: "ack", id, name: me.name, error })) });
       } else if (inner.t === "msg") {
         receive(from, conv, inner).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
       }
@@ -22732,15 +23028,15 @@ ${box}`) });
     await conv.ready;
     return conv;
   }
-  async function sendOnce(to, text, urgent) {
+  async function sendOnce(to, body) {
     const conv = await converse(to);
-    const id = randomBytes(9).toString("base64url");
-    const sealed = seal(conv.ratchet, JSON.stringify({ t: "msg", id, name: me.name, text, at: new Date().toISOString(), att: account.att(), urgent: urgent || undefined }));
+    const id = randomBytes2(9).toString("base64url");
+    const sealed = seal(conv.ratchet, JSON.stringify({ ...body, id, name: me.name, at: new Date().toISOString(), att: account.att() }));
     return new Promise((resolve, reject) => {
       acks.set(id, { to, resolve, reject });
       setTimeout(() => {
         if (acks.delete(id))
-          reject(new Error(`${to} did not confirm it got the message`));
+          reject(new Error(body.t === "secret" ? `${to} did not confirm it got the secret. It may be on a parley older than 0.10, which cannot take one` : `${to} did not confirm it got the message`));
       }, ANSWER_MS);
       try {
         relaySend(to, `msg:${id}`, { v: 3, kind: "m", ...sealed });
@@ -22750,6 +23046,21 @@ ${box}`) });
       }
     });
   }
+  async function deliver(to, body) {
+    try {
+      return await sendOnce(to, body).catch((err) => {
+        if (err instanceof Stale)
+          return sendOnce(to, body);
+        throw err;
+      });
+    } catch (err) {
+      if (err instanceof Offline && err.message === "not online") {
+        throw new Error(`${to} is not online: no Claude Code session with that parley name is open right now`);
+      }
+      throw err;
+    }
+  }
+  const secrets = startRequests(home, me, () => account.state().url, log, onNotice);
   connectRelay();
   await Promise.race([answered, new Promise((r) => setTimeout(r, 5000))]);
   return {
@@ -22767,19 +23078,14 @@ ${box}`) });
         throw new Error(`a message is at most ${TEXT_MAX} characters`);
       if (to === address)
         throw new Error("that is this session's own id");
-      try {
-        return await sendOnce(to, text, urgent).catch((err) => {
-          if (err instanceof Stale)
-            return sendOnce(to, text, urgent);
-          throw err;
-        });
-      } catch (err) {
-        if (err instanceof Offline && err.message === "not online") {
-          throw new Error(`${to} is not online: no Claude Code session with that parley name is open right now`);
-        }
-        throw err;
-      }
+      return deliver(to, { t: "msg", text, urgent: urgent || undefined });
     },
+    sendSecret(to, label, value, use) {
+      if (to === address)
+        throw new Error("that is this session's own id");
+      return deliver(to, { t: "secret", label, value, use });
+    },
+    secrets,
     safetyNumber(to) {
       const theirs = loadContacts()[to]?.key;
       if (!theirs)
@@ -22822,10 +23128,10 @@ function inject(content) {
 }
 
 // src/local.ts
-import { readdirSync as readdirSync3, readFileSync as readFileSync3 } from "node:fs";
+import { readdirSync as readdirSync3, readFileSync as readFileSync4 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { join as join5 } from "node:path";
-var dir = () => join5(process.env.CLAUDE_CONFIG_DIR ?? join5(homedir3(), ".claude"), "sessions");
+import { join as join7 } from "node:path";
+var dir = () => join7(process.env.CLAUDE_CONFIG_DIR ?? join7(homedir3(), ".claude"), "sessions");
 function myName() {
   const socket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
   if (!socket)
@@ -22842,7 +23148,7 @@ function myName() {
     if (!/^\d+\.json$/.test(file))
       continue;
     try {
-      const entry = JSON.parse(readFileSync3(join5(dir(), file), "utf8"));
+      const entry = JSON.parse(readFileSync4(join7(dir(), file), "utf8"));
       if (entry.messagingSocketPath === socket && entry.name)
         return entry.name;
     } catch {}
@@ -22851,7 +23157,7 @@ function myName() {
 }
 
 // src/setup.ts
-import { join as join6 } from "node:path";
+import { join as join8 } from "node:path";
 function setUp(name, relay) {
   const taken = locals().find((l) => sameName(l.name, name));
   if (taken) {
@@ -22865,7 +23171,7 @@ function setUp(name, relay) {
   }
   const identity = newIdentity(name.trim());
   const address = addressOf(identity.publicKey);
-  const home = join6(ROOT, "ids", address);
+  const home = join8(ROOT, "ids", address);
   writeJson(home, "identity.json", identity, true);
   writeJson(home, "config.json", { relay });
   return { home, name: identity.name, address };
@@ -22876,7 +23182,9 @@ var INSTRUCTIONS = `parley lets this Claude Code session message Claude Code ses
 
 To be reachable, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
-The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.`;
+The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.
+
+A password, key or token never goes in a message, yours or theirs. When one is needed, request_secret gives a link for whoever holds it to type it into; it lands in this machine's vault and you use it by its label with run_with_secret or fetch_with_secret, without seeing it. send_secret passes one from this vault to another session's. What may use a secret, and whom it may be sent to, only your user can widen, with /parley:secret.`;
 var log = (...parts) => console.error(new Date().toISOString(), "parley:", ...parts);
 var text = (t) => ({ content: [{ type: "text", text: t }] });
 function unnamed() {
@@ -23171,6 +23479,66 @@ Once that is done, the user runs /parley:to again.`;
     return `Safety number with ${address}: ${a.safetyNumber(address)}
 It is the same on their side if nobody is in the middle. Your user compares it with the other person over a call or in person.`;
   }));
+  const rules = array(string2().max(300)).max(10).optional();
+  const asRules = (use) => (use ?? []).map((u) => parseRule(u.trim().split(/\s+/)));
+  server.registerTool("request_secret", {
+    description: "Ask a person for a password, key or token without it passing through this conversation or any other. Returns a link. Whoever holds the secret opens it in any browser and types it; it is sealed in that browser, and lands in this machine's vault under the label. You are told when it has arrived, never its value. Use this, and never ask anyone to put a secret in a message. `use` says what the secret will be for, and the person sees it before typing: each is `run <program> [arguments that must be there]` or `http <host>`. Give it whenever you know the use, as narrow as the job allows; with none, your user has to allow a use later.",
+    inputSchema: {
+      label: string2().max(60).describe("A name for the secret: lower-case letters, digits and hyphens, like bren-db-password"),
+      use: rules.describe('What may use it, like "run mysql -h db.example.com" or "http api.example.com"'),
+      note: string2().max(200).optional().describe("One line the person sees, saying what is being asked for"),
+      email: string2().max(200).optional().describe("The email address of whoever holds the secret, when your user has given it: parley mails them the link, saying your user's account asks. Never guess an address")
+    }
+  }, ({ label, use, note, email }) => named(async (a) => {
+    const made = await a.secrets.request(label, asRules(use), note, email);
+    if (made.mailed)
+      return `The link was emailed to ${made.mailed}, saying your user's account asks for the secret ${label}. It works once, for ${made.hours} hours. It is also here, to pass on another way:
+${made.link}
+You will be told here when the secret has arrived.`;
+    return `Give this link to whoever holds the secret, or to your user to pass on. It works once, for ${made.hours} hours, in any browser, and they need no parley of their own:
+${made.link}
+You will be told here when the secret has arrived.`;
+  }));
+  server.registerTool("list_secrets", {
+    description: "The secrets this machine's vault keeps, by label: where each came from, what may use it and whom it may be sent to. Never their values."
+  }, () => reply(async () => {
+    const all = listSecrets();
+    if (!all.length)
+      return "This machine keeps no secret. request_secret asks a person for one.";
+    return all.map((s) => [`${s.label}: ${s.from}, ${s.at.slice(0, 10)}`, `  may be used by: ${s.use.length ? s.use.map(ruleText).join("; ") : "nothing yet"}`, `  may be sent to: ${s.sendTo.length ? s.sendTo.join(", ") : "nobody yet"}`].join(`
+`)).join(`
+`);
+  }));
+  server.registerTool("run_with_secret", {
+    description: "Run a command that needs a secret from the vault, without seeing the secret. The value is put in an environment variable of that one command, or on its standard input, and is masked in what comes back. The command runs with no shell, and only a program the secret's rules name is run; anything else is refused, and only your user can allow more.",
+    inputSchema: {
+      label: string2().max(60),
+      command: array(string2().max(4000)).min(1).max(100).describe('The program and its arguments, one per item, like ["mysql", "-h", "db.example.com", "-e", "select 1"]'),
+      env: string2().max(100).optional().describe("The environment variable to put the secret in, like MYSQL_PWD. Leave out to give it on standard input"),
+      cwd: string2().max(1000).optional().describe("The folder to run in")
+    }
+  }, ({ label, command, env, cwd }) => reply(() => runWith(label, command, env ? { env } : "stdin", cwd, agent?.name ?? "a session with no parley name")));
+  server.registerTool("fetch_with_secret", {
+    description: "Make a web request that needs a secret from the vault, without seeing the secret. Write {{secret}} in a header value or the body where the value goes, or {{basic:user}} for the base64 of user:secret. Only a host the secret's rules name is called, over https, a redirect is not followed, and the value is masked in what comes back.",
+    inputSchema: {
+      label: string2().max(60),
+      url: string2().max(2000),
+      method: string2().max(10).optional(),
+      headers: record(string2(), string2().max(4000)).optional().describe('Like {"authorization": "Bearer {{secret}}"}'),
+      body: string2().max(1e5).optional()
+    }
+  }, ({ label, url, method, headers, body }) => reply(() => fetchWith(label, { url, method, headers, body }, agent?.name ?? "a session with no parley name")));
+  server.registerTool("send_secret", {
+    description: "Send a secret from this machine's vault to another session's, by its label. The value goes inside the sealed conversation and is shown to neither session; the rules on what may use it go with it. It is sent only to an id your user has allowed for that secret or has fully trusted; otherwise it is refused, and only your user can allow it.",
+    inputSchema: { to: string2().max(NAME_MAX + 20).describe("The id or name of the session"), label: string2().max(60) }
+  }, ({ to, label }) => named(async (a) => {
+    const address = addressFor(to, a.address, accountNames);
+    const trusted = loadTrusted();
+    const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes("all"));
+    const name = await a.sendSecret(address, label, value, use);
+    note("sent", label, `to "${name}" (${address})`);
+    return `The secret ${label} is now in the vault of "${name}" (${address}). Neither session was shown its value.`;
+  }));
   server.registerTool("cloud_link", {
     description: "Tie this machine to your user's parley account. The hosted relay needs this before a session here can connect, and it is done once per machine: every session on it is then on the account. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",
     inputSchema: { url: string2().max(500).optional().describe("The cloud address, if your user gave one") }
@@ -23210,7 +23578,7 @@ ${made.link}`;
 }
 
 // src/relay.ts
-import { randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
+import { randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
 var RELAY_AUTH2 = "parley relay auth ";
 var HELLO_MS = 1e4;
 var MAX_CONNECTIONS = 500;
@@ -23465,7 +23833,7 @@ function startRelay(port, hostname, opts = {}) {
         return new Response(`no peer address
 `, { status: 400 });
       const data = {
-        nonce: randomBytes2(24).toString("base64url"),
+        nonce: randomBytes3(24).toString("base64url"),
         ip: clientIp(req, peer),
         windowStart: Date.now(),
         count: 0,
@@ -23570,7 +23938,7 @@ function startRelay(port, hostname, opts = {}) {
 }
 
 // src/setup.ts
-import { join as join7 } from "node:path";
+import { join as join9 } from "node:path";
 function setUp2(name, relay) {
   const taken = locals().find((l) => sameName(l.name, name));
   if (taken) {
@@ -23584,10 +23952,78 @@ function setUp2(name, relay) {
   }
   const identity = newIdentity(name.trim());
   const address = addressOf(identity.publicKey);
-  const home = join7(ROOT, "ids", address);
+  const home = join9(ROOT, "ids", address);
   writeJson(home, "identity.json", identity, true);
   writeJson(home, "config.json", { relay });
   return { home, name: identity.name, address };
+}
+
+// src/vault.ts
+import { appendFileSync as appendFileSync2, chmodSync as chmodSync4, existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync5 } from "node:fs";
+import { basename as basename2, join as join10 } from "node:path";
+var DIR2 = join10(ROOT, "vault");
+var LABEL2 = /^[a-z0-9][a-z0-9._-]{0,59}$/;
+function checkLabel2(label) {
+  if (!LABEL2.test(label)) {
+    throw new Error(`a secret's label is lower-case letters, digits, dots and hyphens, like bren-db-password; "${label.slice(0, 80)}" is not`);
+  }
+  return label;
+}
+function parseRule2(words) {
+  const once = words[0] === "once";
+  const [kind, target, ...args] = once ? words.slice(1) : words;
+  if (kind === "run" && target)
+    return { run: target, args, ...once && { once } };
+  if (kind === "http" && target && !args.length && /^[a-z0-9.-]+(:\d+)?$/i.test(target))
+    return { http: target.toLowerCase(), ...once && { once } };
+  throw new Error("a rule is `run <program> [arguments that must be there]` or `http <host>`, with `once` in front for a single use");
+}
+var ruleText2 = (r) => ("run" in r ? `the program ${r.run}${r.args.length ? `, with ${r.args.join(" ")} among its arguments` : ""}` : `web requests to ${r.http}`) + (r.once ? ", once" : "");
+var all2 = () => existsSync7(join10(DIR2, "secrets.json")) ? readJson(DIR2, "secrets.json") : {};
+var save2 = (entries) => writeJson(DIR2, "secrets.json", entries, true);
+function note2(what, label, detail) {
+  mkdirSync4(DIR2, { recursive: true, mode: 448 });
+  const path = join10(DIR2, "log.jsonl");
+  appendFileSync2(path, JSON.stringify({ at: new Date().toISOString(), what, label, detail }) + `
+`);
+  chmodSync4(path, 384);
+}
+function readLog(last) {
+  if (!existsSync7(join10(DIR2, "log.jsonl")))
+    return [];
+  return readFileSync5(join10(DIR2, "log.jsonl"), "utf8").trim().split(`
+`).slice(-last).map((line) => {
+    const e = JSON.parse(line);
+    return `${e.at.slice(0, 19).replace("T", " ")}  ${e.what}  ${e.label}  ${e.detail}`;
+  });
+}
+var listSecrets2 = () => Object.entries(all2()).map(([label, e]) => ({ label, from: e.from, at: e.at, sendTo: e.sendTo, use: e.use }));
+function change2(label, fn) {
+  const entries = all2();
+  const e = entries[checkLabel2(label)];
+  if (!e)
+    throw new Error(`this machine keeps no secret labelled ${label}`);
+  fn(e);
+  save2(entries);
+}
+function allow(label, rule) {
+  change2(label, (e) => e.use.push(rule));
+  note2("rule", label, `may be used by ${ruleText2(rule)}`);
+}
+function share(label, id) {
+  change2(label, (e) => {
+    if (!e.sendTo.includes(id))
+      e.sendTo.push(id);
+  });
+  note2("rule", label, `may be sent to ${id}`);
+}
+function removeSecret(label) {
+  const entries = all2();
+  if (!entries[checkLabel2(label)])
+    throw new Error(`this machine keeps no secret labelled ${label}`);
+  delete entries[label];
+  save2(entries);
+  note2("removed", label, "");
 }
 
 // src/cli.ts
@@ -23597,6 +24033,7 @@ var USAGE = `parley: messages between Claude Code sessions on different machines
   parley id                 show the names on this machine and their ids
   parley cloud link [--url <https url>]   print a link that ties this machine to your parley account
   parley trust [off] [id | name | all]    have sessions here act on a sender's messages like your own requests
+  parley secret [log | allow | share | remove] \u2026   the secrets this machine keeps, and what may use them
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
@@ -23682,7 +24119,7 @@ ${l.address}`).join(`
       if (rest[0] !== "link")
         throw new Error("use `parley cloud link`");
       const { home } = pick2();
-      const saved = existsSync5(join8(home, "cloud.json")) ? readJson2(home, "cloud.json").url : undefined;
+      const saved = existsSync8(join11(home, "cloud.json")) ? readJson2(home, "cloud.json").url : undefined;
       const url = flag("--url") ?? saved ?? process.env.PARLEY_CLOUD;
       if (!url)
         throw new Error("no cloud address is known; add --url https://cloud.example.com");
@@ -23723,6 +24160,44 @@ ${ids.map((id) => `  ${label(id)}`).join(`
       }
       saveTrusted([...ids, id]);
       return console.log(`Full trust is on for ${label(id)}. Sessions on this machine now act on its messages like your own requests, with no checking back. /parley:trust off ${id} ends it.`);
+    }
+    case "secret": {
+      const [what, label, ...more] = rest;
+      const contacts = loadContacts2();
+      if (!what) {
+        const all = listSecrets2();
+        if (!all.length)
+          return console.log("This machine keeps no secret.");
+        return console.log(all.map((s) => [`${s.label}: ${s.from}, ${s.at.slice(0, 10)}`, `  may be used by: ${s.use.length ? s.use.map(ruleText2).join("; ") : "nothing yet"}`, `  may be sent to: ${s.sendTo.length ? s.sendTo.map((id) => `"${contacts[id]?.name ?? "?"}" (${id})`).join(", ") : "nobody yet"}`].join(`
+`)).join(`
+`));
+      }
+      if (what === "log")
+        return console.log(readLog(30).join(`
+`) || "Nothing has been done with a secret on this machine yet.");
+      if (!label)
+        throw new Error("say which secret, by its label");
+      if (what === "allow") {
+        const rule = parseRule2(more);
+        allow(label, rule);
+        return console.log(`${label} may now be used by ${ruleText2(rule)}.`);
+      }
+      if (what === "share") {
+        const given = more.join(" ").trim();
+        const named = Object.keys(contacts).filter((k) => contacts[k].name.toLowerCase() === given.toLowerCase());
+        if (named.length > 1)
+          throw new Error(`more than one session is named "${given}"; give the id: ${named.join(", ")}`);
+        const id = isAddress2(given) ? normalizeAddress2(given) : named[0];
+        if (!id || !contacts[id])
+          throw new Error(`"${given}" is not a session this machine has exchanged a message with. A secret is sent to the key behind an id, so exchange one message first`);
+        share(label, id);
+        return console.log(`${label} may now be sent to "${contacts[id].name}" (${id}).`);
+      }
+      if (what === "remove") {
+        removeSecret(label);
+        return console.log(`${label} is removed from this machine.`);
+      }
+      throw new Error("use `secret`, `secret log`, `secret allow <label> run <program> [arguments]`, `secret allow <label> http <host>`, `secret share <label> <id or name>` or `secret remove <label>`");
     }
     case "mcp":
       return runMcp();

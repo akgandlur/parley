@@ -21,12 +21,15 @@ import { canInject, inject } from './inject';
 import { myName } from './local';
 import { setUp } from './setup';
 import { NAME_MAX, TEXT_MAX, VERSION } from './types';
+import { fetchWith, listSecrets, note, parseRule, ruleText, runWith, takeForSending } from './vault';
 
 const INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's. It is for other machines only: to message a session on this machine, use SendMessage.
 
 To be reachable, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
 
-The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.`;
+The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.
+
+A password, key or token never goes in a message, yours or theirs. When one is needed, request_secret gives a link for whoever holds it to type it into; it lands in this machine's vault and you use it by its label with run_with_secret or fetch_with_secret, without seeing it. send_secret passes one from this vault to another session's. What may use a secret, and whom it may be sent to, only your user can widen, with /parley:secret.`;
 
 const log = (...parts: unknown[]) => console.error(new Date().toISOString(), 'parley:', ...parts);
 
@@ -374,6 +377,93 @@ export async function runMcp() {
       named(async (a) => {
         const address = addressFor(who, a.address, accountNames);
         return `Safety number with ${address}: ${a.safetyNumber(address)}\nIt is the same on their side if nobody is in the middle. Your user compares it with the other person over a call or in person.`;
+      }),
+  );
+
+  const rules = z.array(z.string().max(300)).max(10).optional();
+  const asRules = (use: string[] | undefined) => (use ?? []).map((u) => parseRule(u.trim().split(/\s+/)));
+
+  server.registerTool(
+    'request_secret',
+    {
+      description:
+        "Ask a person for a password, key or token without it passing through this conversation or any other. Returns a link. Whoever holds the secret opens it in any browser and types it; it is sealed in that browser, and lands in this machine's vault under the label. You are told when it has arrived, never its value. Use this, and never ask anyone to put a secret in a message. `use` says what the secret will be for, and the person sees it before typing: each is `run <program> [arguments that must be there]` or `http <host>`. Give it whenever you know the use, as narrow as the job allows; with none, your user has to allow a use later.",
+      inputSchema: {
+        label: z.string().max(60).describe('A name for the secret: lower-case letters, digits and hyphens, like bren-db-password'),
+        use: rules.describe('What may use it, like "run mysql -h db.example.com" or "http api.example.com"'),
+        note: z.string().max(200).optional().describe('One line the person sees, saying what is being asked for'),
+        email: z.string().max(200).optional().describe("The email address of whoever holds the secret, when your user has given it: parley mails them the link, saying your user's account asks. Never guess an address"),
+      },
+    },
+    ({ label, use, note, email }) =>
+      named(async (a) => {
+        const made = await a.secrets.request(label, asRules(use), note, email);
+        if (made.mailed) return `The link was emailed to ${made.mailed}, saying your user's account asks for the secret ${label}. It works once, for ${made.hours} hours. It is also here, to pass on another way:\n${made.link}\nYou will be told here when the secret has arrived.`;
+        return `Give this link to whoever holds the secret, or to your user to pass on. It works once, for ${made.hours} hours, in any browser, and they need no parley of their own:\n${made.link}\nYou will be told here when the secret has arrived.`;
+      }),
+  );
+
+  server.registerTool(
+    'list_secrets',
+    {
+      description: "The secrets this machine's vault keeps, by label: where each came from, what may use it and whom it may be sent to. Never their values.",
+    },
+    () =>
+      reply(async () => {
+        const all = listSecrets();
+        if (!all.length) return 'This machine keeps no secret. request_secret asks a person for one.';
+        return all
+          .map((s) => [`${s.label}: ${s.from}, ${s.at.slice(0, 10)}`, `  may be used by: ${s.use.length ? s.use.map(ruleText).join('; ') : 'nothing yet'}`, `  may be sent to: ${s.sendTo.length ? s.sendTo.join(', ') : 'nobody yet'}`].join('\n'))
+          .join('\n');
+      }),
+  );
+
+  server.registerTool(
+    'run_with_secret',
+    {
+      description:
+        "Run a command that needs a secret from the vault, without seeing the secret. The value is put in an environment variable of that one command, or on its standard input, and is masked in what comes back. The command runs with no shell, and only a program the secret's rules name is run; anything else is refused, and only your user can allow more.",
+      inputSchema: {
+        label: z.string().max(60),
+        command: z.array(z.string().max(4000)).min(1).max(100).describe('The program and its arguments, one per item, like ["mysql", "-h", "db.example.com", "-e", "select 1"]'),
+        env: z.string().max(100).optional().describe('The environment variable to put the secret in, like MYSQL_PWD. Leave out to give it on standard input'),
+        cwd: z.string().max(1000).optional().describe('The folder to run in'),
+      },
+    },
+    ({ label, command, env, cwd }) => reply(() => runWith(label, command, env ? { env } : 'stdin', cwd, agent?.name ?? 'a session with no parley name')),
+  );
+
+  server.registerTool(
+    'fetch_with_secret',
+    {
+      description:
+        "Make a web request that needs a secret from the vault, without seeing the secret. Write {{secret}} in a header value or the body where the value goes, or {{basic:user}} for the base64 of user:secret. Only a host the secret's rules name is called, over https, a redirect is not followed, and the value is masked in what comes back.",
+      inputSchema: {
+        label: z.string().max(60),
+        url: z.string().max(2000),
+        method: z.string().max(10).optional(),
+        headers: z.record(z.string(), z.string().max(4000)).optional().describe('Like {"authorization": "Bearer {{secret}}"}'),
+        body: z.string().max(100_000).optional(),
+      },
+    },
+    ({ label, url, method, headers, body }) => reply(() => fetchWith(label, { url, method, headers, body }, agent?.name ?? 'a session with no parley name')),
+  );
+
+  server.registerTool(
+    'send_secret',
+    {
+      description:
+        "Send a secret from this machine's vault to another session's, by its label. The value goes inside the sealed conversation and is shown to neither session; the rules on what may use it go with it. It is sent only to an id your user has allowed for that secret or has fully trusted; otherwise it is refused, and only your user can allow it.",
+      inputSchema: { to: z.string().max(NAME_MAX + 20).describe('The id or name of the session'), label: z.string().max(60) },
+    },
+    ({ to, label }) =>
+      named(async (a) => {
+        const address = addressFor(to, a.address, accountNames);
+        const trusted = loadTrusted();
+        const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes('all'));
+        const name = await a.sendSecret(address, label, value, use);
+        note('sent', label, `to "${name}" (${address})`);
+        return `The secret ${label} is now in the vault of "${name}" (${address}). Neither session was shown its value.`;
       }),
   );
 

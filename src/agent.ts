@@ -8,7 +8,9 @@ import { addressOf, sealTo08, signText } from './crypto';
 import { isSavedKey, loadConfig, loadContacts, loadIdentity, readJson, saveContact } from './home';
 import { answer, canSeal, checkOffer, finish, offer, open, safetyNumber, seal, type Ratchet } from './ratchet';
 import { RELAY_AUTH } from './relay';
+import { secretArrived, startRequests } from './secrets';
 import { TEXT_MAX, VERSION } from './types';
+import { parseRule, putSecret, type Rule } from './vault';
 
 const RETRY_MAX_MS = 15_000;
 const CONNECT_WAIT_MS = 15_000;
@@ -337,7 +339,24 @@ export async function startAgent(
         if (!wait || wait.to !== from) return;
         acks.delete(String(inner.id));
         saveContact(from, String(inner.name), conv.key);
-        wait.resolve(String(inner.name));
+        if (inner.error) wait.reject(new Error(`${from} did not take it: ${String(inner.error).slice(0, 500)}`));
+        else wait.resolve(String(inner.name));
+      } else if (inner.t === 'secret') {
+        const id = String(inner.id);
+        const who = `"${String(inner.name)}" (${from})`;
+        let error: string | undefined;
+        if (!seen.has(id)) {
+          seen.add(id);
+          saveContact(from, String(inner.name), conv.key);
+          try {
+            const use = (Array.isArray(inner.use) ? inner.use : []).map((r: any) => parseRule(('run' in r ? ['run', String(r.run), ...r.args.map(String)] : ['http', String(r.http)])));
+            putSecret(String(inner.label), String(inner.value), who, use);
+            onNotice(secretArrived(String(inner.label), `${who} sent it`, use));
+          } catch (err) {
+            error = explain(err);
+          }
+        }
+        relaySend(from, `ack:${id}`, { v: 3, kind: 'm', ...seal(conv.ratchet, JSON.stringify({ t: 'ack', id, name: me.name, error })) });
       } else if (inner.t === 'msg') {
         void receive(from, conv, inner).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
       }
@@ -389,14 +408,14 @@ export async function startAgent(
     return conv;
   }
 
-  async function sendOnce(to: string, text: string, urgent: boolean): Promise<string> {
+  async function sendOnce(to: string, body: Record<string, unknown>): Promise<string> {
     const conv = await converse(to);
     const id = randomBytes(9).toString('base64url');
-    const sealed = seal(conv.ratchet as Ratchet, JSON.stringify({ t: 'msg', id, name: me.name, text, at: new Date().toISOString(), att: account.att(), urgent: urgent || undefined }));
+    const sealed = seal(conv.ratchet as Ratchet, JSON.stringify({ ...body, id, name: me.name, at: new Date().toISOString(), att: account.att() }));
     return new Promise<string>((resolve, reject) => {
       acks.set(id, { to, resolve, reject });
       setTimeout(() => {
-        if (acks.delete(id)) reject(new Error(`${to} did not confirm it got the message`));
+        if (acks.delete(id)) reject(new Error(body.t === 'secret' ? `${to} did not confirm it got the secret. It may be on a parley older than 0.10, which cannot take one` : `${to} did not confirm it got the message`));
       }, ANSWER_MS);
       try {
         relaySend(to, `msg:${id}`, { v: 3, kind: 'm', ...sealed });
@@ -406,6 +425,22 @@ export async function startAgent(
       }
     });
   }
+
+  async function deliver(to: string, body: Record<string, unknown>): Promise<string> {
+    try {
+      return await sendOnce(to, body).catch((err) => {
+        if (err instanceof Stale) return sendOnce(to, body);
+        throw err;
+      });
+    } catch (err) {
+      if (err instanceof Offline && err.message === 'not online') {
+        throw new Error(`${to} is not online: no Claude Code session with that parley name is open right now`);
+      }
+      throw err;
+    }
+  }
+
+  const secrets = startRequests(home, me, () => account.state().url, log, onNotice);
 
   connectRelay();
   await Promise.race([answered, new Promise((r) => setTimeout(r, 5000))]);
@@ -424,18 +459,15 @@ export async function startAgent(
     async send(to: string, text: string, urgent = false): Promise<string> {
       if (text.length > TEXT_MAX) throw new Error(`a message is at most ${TEXT_MAX} characters`);
       if (to === address) throw new Error("that is this session's own id");
-      try {
-        return await sendOnce(to, text, urgent).catch((err) => {
-          if (err instanceof Stale) return sendOnce(to, text, urgent);
-          throw err;
-        });
-      } catch (err) {
-        if (err instanceof Offline && err.message === 'not online') {
-          throw new Error(`${to} is not online: no Claude Code session with that parley name is open right now`);
-        }
-        throw err;
-      }
+      return deliver(to, { t: 'msg', text, urgent: urgent || undefined });
     },
+    // The value goes from this machine's vault into the other's, inside the
+    // sealed conversation, and is shown to neither session.
+    sendSecret(to: string, label: string, value: string, use: Rule[]): Promise<string> {
+      if (to === address) throw new Error("that is this session's own id");
+      return deliver(to, { t: 'secret', label, value, use });
+    },
+    secrets,
     // Needs the other side's key, which is saved once a message has been exchanged.
     safetyNumber(to: string): string {
       const theirs = loadContacts()[to]?.key;
