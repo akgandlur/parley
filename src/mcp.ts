@@ -360,7 +360,7 @@ export async function runMcp() {
     },
     ({ url }) =>
       named(async (a) => {
-        const made = a.account.link(url ?? process.env.PARLEY_CLOUD);
+        const made = await a.account.link(url ?? process.env.PARLEY_CLOUD);
         return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the machine is linked:\n${made.link}`;
       }),
   );

@@ -12,6 +12,7 @@ import { machineIdentity, readJson, writeJson } from './home';
 const RENEW_LEFT_MS = 18 * 3600_000;
 const CHECK_MS = 2 * 60_000;
 const UNLINKED_CHECK_MS = 30_000;
+const LINK_FRESH_MS = 10 * 60_000;
 
 export type AttestFile = { att: string; issuer: string; sync?: boolean; fetchedAt: string };
 export type Verified = { domain: string | null; kind: 'account' | 'visitor' };
@@ -33,7 +34,7 @@ const originOf = (url: string) => {
 // The link carries no secret of the machine's. Whoever opens it while signed
 // in to the cloud ties this machine to their account, so it goes to the
 // person and is good for a few minutes only.
-export function linkFor(to: string) {
+function longLinkFor(to: string) {
   const machine = machineIdentity();
   const t = new Date().toISOString();
   const query = new URLSearchParams({
@@ -43,7 +44,27 @@ export function linkFor(to: string) {
     t,
     sig: signText(machine, `parley-cloud-link-machine\n${to}\n${t}\n${machine.name}`),
   });
-  return `${to}/link?${query}`;
+  return { long: `${to}/link?${query}`, query };
+}
+
+// The full link is some 250 characters, and terminals and chat apps cut it,
+// so the cloud is asked for a short one. A cloud that has none gives 404.
+export async function linkFor(to: string, log: (...parts: unknown[]) => void = () => {}) {
+  const { long, query } = longLinkFor(to);
+  try {
+    const res = await fetch(`${to}/api/link`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(query)),
+      signal: AbortSignal.timeout(5000),
+    });
+    const reply = (await res.json().catch(() => ({}))) as { link?: string; error?: string };
+    if (!res.ok || typeof reply.link !== 'string') throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    return reply.link;
+  } catch (err) {
+    log('no short link, so the long one is given:', err instanceof Error ? err.message : err);
+    return long;
+  }
 }
 
 export function startAccount(
@@ -81,6 +102,7 @@ export function startAccount(
     if (saved) attest = undefined;
   }
   let refusal: 'not linked' | 'banned' | undefined;
+  let link: { to: string; at: number; link: string } | undefined;
   let error: string | undefined;
   let checking: Promise<void> | undefined;
   let lastCheck = 0;
@@ -107,6 +129,9 @@ export function startAccount(
     const reply = (await res.json().catch(() => ({}))) as Partial<AttestFile> & { error?: string };
     if (res.status === 403 && (reply.error === 'not linked' || reply.error === 'banned')) {
       if (refusal !== reply.error) log(`the cloud says this name is ${reply.error}`);
+      if (reply.error === 'not linked' && url && (!link || link.to !== url || Date.now() - link.at > LINK_FRESH_MS)) {
+        link = { to: url, at: Date.now(), link: await linkFor(url, log) };
+      }
       refusal = reply.error;
       return;
     }
@@ -185,7 +210,7 @@ export function startAccount(
       const a = attest && own(attest);
       return {
         url,
-        link: url && refusal === 'not linked' ? linkFor(url) : undefined,
+        link: url && refusal === 'not linked' && link?.to === url ? link.link : undefined,
         error:
           refusal === 'banned'
             ? 'the account this machine is linked to is banned'
@@ -195,7 +220,7 @@ export function startAccount(
         verified: a ? { domain: a.domain, kind: a.kind } : undefined,
       };
     },
-    link(to: string | undefined): { url: string; link: string } {
+    async link(to: string | undefined): Promise<{ url: string; link: string }> {
       const given = to ?? url ?? process.env.PARLEY_CLOUD;
       if (!given) throw new Error('no cloud address is known; give one, like https://cloud.example.com');
       const next = originOf(given);
@@ -205,7 +230,8 @@ export function startAccount(
         writeJson(home, 'cloud.json', { url });
       }
       void check();
-      return { url: next, link: linkFor(next) };
+      link = { to: next, at: Date.now(), link: await linkFor(next, log) };
+      return { url: next, link: link.link };
     },
     unlink() {
       writeJson(home, 'cloud.json', { url: null });

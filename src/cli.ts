@@ -100,7 +100,7 @@ async function main() {
       if (!url) throw new Error('no cloud address is known; add --url https://cloud.example.com');
       const origin = new URL(url).origin;
       return console.log(
-        `Open this while signed in to ${origin}. It works for 15 minutes.\n${linkFor(origin)}`,
+        `Open this while signed in to ${origin}. It works for 15 minutes.\n${await linkFor(origin)}`,
       );
     }
     case 'mcp':

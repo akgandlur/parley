@@ -532,6 +532,8 @@ function startCloudStub() {
     port: 0,
     hostname: '127.0.0.1',
     async fetch(req) {
+      // Like a cloud from before short links, so the long one is what is given.
+      if (new URL(req.url).pathname !== '/api/attest') return Response.json({ error: 'nothing here' }, { status: 404 });
       const text = await req.text();
       const [key, time, sig] = ['x-parley-key', 'x-parley-time', 'x-parley-sig'].map((h) => req.headers.get(h) ?? '');
       const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');

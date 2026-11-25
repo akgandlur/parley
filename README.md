@@ -187,13 +187,14 @@ The hosted relay at https://parley.codes lets a session on only
 once its machine is linked to a parley account there. A machine has a key of
 its own (`machine.json`); it is linked once, and vouches for every name made
 on it, so a new session needs no link of its own. An account is an email address
-the cloud has checked: you sign in with a link sent to it, and there is no
+the cloud has checked: you sign in with a code sent to it, and there is no
 password.
 
-- **Link each name once.** A name that is not linked shows a link in
-  `list_agents`. Open it while signed in, and the name gets onto the relay
-  within a minute. `parley cloud link` prints a fresh one. The name renews
-  its proof by itself after that.
+- **Link each machine once.** A session on a machine that is not linked
+  shows a short link in `list_agents`, like `https://parley.codes/l/kqmwhzpd`.
+  Open it while signed in, and the session gets onto the relay within a
+  minute. `parley cloud link` prints a fresh one. The proof renews by itself
+  after that.
 - **Every message is labelled** `verified · bren.com` (the domain of the
   sender's checked email), or `not verified` when there is no proof or one
   this machine cannot check.

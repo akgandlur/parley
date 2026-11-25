@@ -7231,7 +7231,8 @@ function take(address) {
 // src/account.ts
 var RENEW_LEFT_MS = 18 * 3600000;
 var CHECK_MS = 2 * 60000;
-function linkFor(to) {
+var LINK_FRESH_MS = 10 * 60000;
+function longLinkFor(to) {
   const machine = machineIdentity();
   const t = new Date().toISOString();
   const query = new URLSearchParams({
@@ -7244,7 +7245,25 @@ ${to}
 ${t}
 ${machine.name}`)
   });
-  return `${to}/link?${query}`;
+  return { long: `${to}/link?${query}`, query };
+}
+async function linkFor(to, log = () => {}) {
+  const { long, query } = longLinkFor(to);
+  try {
+    const res = await fetch(`${to}/api/link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(Object.fromEntries(query)),
+      signal: AbortSignal.timeout(5000)
+    });
+    const reply = await res.json().catch(() => ({}));
+    if (!res.ok || typeof reply.link !== "string")
+      throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    return reply.link;
+  } catch (err) {
+    log("no short link, so the long one is given:", err instanceof Error ? err.message : err);
+    return long;
+  }
 }
 
 // src/home.ts
@@ -21969,6 +21988,7 @@ import { join as join3 } from "node:path";
 var RENEW_LEFT_MS2 = 18 * 3600000;
 var CHECK_MS2 = 2 * 60000;
 var UNLINKED_CHECK_MS = 30000;
+var LINK_FRESH_MS2 = 10 * 60000;
 var verifiedText = (v) => !v ? "not verified" : v.kind === "visitor" ? "visitor" : `verified · ${v.domain}`;
 var originOf = (url) => {
   const parsed = new URL(url);
@@ -21977,7 +21997,7 @@ var originOf = (url) => {
   }
   return parsed.origin;
 };
-function linkFor2(to) {
+function longLinkFor2(to) {
   const machine = machineIdentity();
   const t = new Date().toISOString();
   const query = new URLSearchParams({
@@ -21990,7 +22010,25 @@ ${to}
 ${t}
 ${machine.name}`)
   });
-  return `${to}/link?${query}`;
+  return { long: `${to}/link?${query}`, query };
+}
+async function linkFor2(to, log = () => {}) {
+  const { long, query } = longLinkFor2(to);
+  try {
+    const res = await fetch(`${to}/api/link`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(Object.fromEntries(query)),
+      signal: AbortSignal.timeout(5000)
+    });
+    const reply = await res.json().catch(() => ({}));
+    if (!res.ok || typeof reply.link !== "string")
+      throw new Error(reply.error ?? `the cloud answered ${res.status}`);
+    return reply.link;
+  } catch (err) {
+    log("no short link, so the long one is given:", err instanceof Error ? err.message : err);
+    return long;
+  }
 }
 function startAccount(home, me, log, renewed) {
   const own = (f) => readAttestation(f.att, [f.issuer], me.publicKey, 0);
@@ -22013,6 +22051,7 @@ function startAccount(home, me, log, renewed) {
       attest = undefined;
   }
   let refusal;
+  let link;
   let error;
   let checking;
   let lastCheck = 0;
@@ -22042,6 +22081,9 @@ ${digest}`)
     if (res.status === 403 && (reply.error === "not linked" || reply.error === "banned")) {
       if (refusal !== reply.error)
         log(`the cloud says this name is ${reply.error}`);
+      if (reply.error === "not linked" && url && (!link || link.to !== url || Date.now() - link.at > LINK_FRESH_MS2)) {
+        link = { to: url, at: Date.now(), link: await linkFor2(url, log) };
+      }
       refusal = reply.error;
       return;
     }
@@ -22115,12 +22157,12 @@ ${createHash2("sha256").update(body).digest("hex")}`)
       const a = attest && own(attest);
       return {
         url,
-        link: url && refusal === "not linked" ? linkFor2(url) : undefined,
+        link: url && refusal === "not linked" && link?.to === url ? link.link : undefined,
         error: refusal === "banned" ? "the account this machine is linked to is banned" : refusal === "not linked" ? "this machine is not linked to a parley account yet" : error,
         verified: a ? { domain: a.domain, kind: a.kind } : undefined
       };
     },
-    link(to) {
+    async link(to) {
       const given = to ?? url ?? process.env.PARLEY_CLOUD;
       if (!given)
         throw new Error("no cloud address is known; give one, like https://cloud.example.com");
@@ -22131,7 +22173,8 @@ ${createHash2("sha256").update(body).digest("hex")}`)
         writeJson(home, "cloud.json", { url });
       }
       check();
-      return { url: next, link: linkFor2(next) };
+      link = { to: next, at: Date.now(), link: await linkFor2(next, log) };
+      return { url: next, link: link.link };
     },
     unlink() {
       writeJson(home, "cloud.json", { url: null });
@@ -22307,7 +22350,7 @@ var TALK_KEEP_MS = 7 * 24 * 3600000;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.9.4";
+var VERSION = "0.9.5";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -23079,7 +23122,7 @@ It is the same on their side if nobody is in the middle. Your user compares it w
     description: "Tie this machine to your user's parley account. The hosted relay needs this before a session here can connect, and it is done once per machine: every session on it is then on the account. Returns a link your user opens while signed in there; it works for 15 minutes. Use it when your user asks, or when list_agents says the relay needs an account and gives no link.",
     inputSchema: { url: string2().max(500).optional().describe("The cloud address, if your user gave one") }
   }, ({ url }) => named(async (a) => {
-    const made = a.account.link(url ?? process.env.PARLEY_CLOUD);
+    const made = await a.account.link(url ?? process.env.PARLEY_CLOUD);
     return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the machine is linked:
 ${made.link}`;
   }));
@@ -23591,7 +23634,7 @@ ${l.address}`).join(`
         throw new Error("no cloud address is known; add --url https://cloud.example.com");
       const origin = new URL(url).origin;
       return console.log(`Open this while signed in to ${origin}. It works for 15 minutes.
-${linkFor(origin)}`);
+${await linkFor(origin)}`);
     }
     case "mcp":
       return runMcp();
