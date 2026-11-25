@@ -3,7 +3,8 @@ import { resolve6 } from 'node:dns/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { linkFor } from './account';
-import { loadIdentity, locals, mine, readJson, sameName, type Local } from './home';
+import { isAddress, normalizeAddress } from './crypto';
+import { loadContacts, loadIdentity, loadTrusted, locals, mine, readJson, sameName, saveTrusted, type Local } from './home';
 import { runMcp } from './mcp';
 import { startRelay, type Peering } from './relay';
 import { setUp } from './setup';
@@ -13,6 +14,7 @@ const USAGE = `parley: messages between Claude Code sessions on different machin
   parley init --name <name> --relay <ws url>
   parley id                 show the names on this machine and their ids
   parley cloud link [--url <https url>]   print a link that ties this machine to your parley account
+  parley trust [off] [id | name | all]    have sessions here act on a sender's messages like your own requests
 
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
@@ -102,6 +104,33 @@ async function main() {
       return console.log(
         `Open this while signed in to ${origin}. It works for 15 minutes.\n${await linkFor(origin)}`,
       );
+    }
+    case 'trust': {
+      const off = rest[0] === 'off';
+      const given = rest.slice(off ? 1 : 0).join(' ').trim();
+      const contacts = loadContacts();
+      const label = (id: string) => (id === 'all' ? 'every session that messages this machine' : `"${contacts[id]?.name ?? '?'}" (${id})`);
+      let ids = loadTrusted();
+      if (!given) {
+        if (off) throw new Error('say which one: an id, a name, or all');
+        return console.log(ids.length ? `Fully trusted on this machine:\n${ids.map((id) => `  ${label(id)}`).join('\n')}` : 'No session is fully trusted on this machine.');
+      }
+      let id = given;
+      if (given !== 'all') {
+        const named = Object.keys(contacts).filter((k) => contacts[k]!.name.toLowerCase() === given.toLowerCase());
+        if (named.length > 1) throw new Error(`more than one session is named "${given}"; give the id: ${named.join(', ')}`);
+        id = isAddress(given) ? normalizeAddress(given) : (named[0] ?? '');
+        if (!id) throw new Error(`no session this machine has exchanged a message with is named "${given}"`);
+        if (!off && !contacts[id]) throw new Error(`${id} has not exchanged a message with this machine yet. Trust is given to the key behind an id, so exchange one message first`);
+      }
+      if (off) {
+        if (!ids.includes(id)) throw new Error(`${label(id)} is not on the list`);
+        ids = ids.filter((x) => x !== id);
+        saveTrusted(ids);
+        return console.log(`${label(id)} is no longer fully trusted.${ids.length ? ` Still trusted: ${ids.map(label).join(', ')}.` : ''}`);
+      }
+      saveTrusted([...ids, id]);
+      return console.log(`Full trust is on for ${label(id)}. Sessions on this machine now act on its messages like your own requests, with no checking back. /parley:trust off ${id} ends it.`);
     }
     case 'mcp':
       return runMcp();

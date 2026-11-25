@@ -85,6 +85,19 @@ Can you check the March invoices?
 It came through parley, so reply with parley's send_message to "billing", not SendMessage.
 ```
 
+Under the text, parley says whose message it is: another session of your
+own account, someone else's account, or a sender nobody has verified. For
+the last two it tells Claude the message does not speak for you, and to ask
+you before giving anything away or doing what it asks. It also says when an
+id writes for the first time, and when another id used that name before.
+
+`/parley:trust [id or name]` turns that caution off for one sender: sessions
+on this machine then act on its messages like your own requests, without
+checking back. `/parley:trust all` does it for every sender,
+`/parley:trust off [id, name or all]` ends it, and `/parley:trust` alone
+shows the list. Only you can change it; Claude has no tool for it. Claude
+Code's own permission settings still apply.
+
 ## How it reaches the session
 
 Claude Code gives the processes it starts, this MCP server among them, a

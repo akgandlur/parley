@@ -22,7 +22,9 @@ export const HOW_TO_UPDATE =
 
 export type Incoming = {
   id: string;
-  from: { name: string; address: string; verified?: Verified };
+  // `own`: on the same parley account as this session. `first`: this id has
+  // not written before; `was` is an id that wrote under the same name.
+  from: { name: string; address: string; verified?: Verified; own: boolean; first: boolean; was?: string };
   text: string;
   at: string;
   urgent: boolean;
@@ -125,7 +127,7 @@ export async function startAgent(
     if (typeof att !== 'string') return undefined;
     try {
       const a = readAttestation(att, account.issuers(), key);
-      return { domain: a.domain, kind: a.kind };
+      return { domain: a.domain, kind: a.kind, sub: a.sub };
     } catch (err) {
       log(`the account proof from ${who} does not check out:`, explain(err));
       return undefined;
@@ -349,8 +351,13 @@ export async function startAgent(
     if (!seen.has(id)) {
       seen.add(id);
       const verified = verify(inner.att, key, from);
+      const mine = account.state().verified;
+      const own = !!verified && verified.kind === 'account' && mine?.kind === 'account' && verified.sub === mine.sub;
+      const known = loadContacts();
+      const first = !known[from];
+      const was = first ? Object.keys(known).find((k) => known[k]!.name === name) : undefined;
       saveContact(from, name, key);
-      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at), urgent: inner.urgent === true });
+      await onMessage({ id, from: { name, address: from, verified, own, first, was }, text: String(inner.text), at: String(inner.at), urgent: inner.urgent === true });
     }
     if (convs.get(from) !== conv || !conv.ratchet) return;
     relaySend(from, `ack:${id}`, { v: 3, kind: 'm', ...seal(conv.ratchet, JSON.stringify({ t: 'ack', id, name: me.name })) });

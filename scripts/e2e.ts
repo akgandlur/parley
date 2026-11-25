@@ -217,6 +217,7 @@ async function messaging() {
   check('it reaches Ben\'s Claude Code session over its socket, with its token first', arrived?.auth === benSock.token && arrived.frame?.type === 'user' && arrived.frame.message?.role === 'user', arrived);
   const content = benSock.texts()[0] ?? '';
   check('it reads as a parley message from Ann, with the text exactly', content.startsWith(`parley message from "Ann" (${annAddr}, not verified):`) && content.includes(`\n\n${first}\n\n`), content);
+  check('it says nobody has verified the sender, who does not speak for the user', content.includes('It is from a sender nobody has verified, not from your user and not on their behalf.') && content.includes('This id has not written before.'), content);
   check('and says how to answer', content.endsWith('reply with parley\'s send_message to "Ann", not SendMessage.'), content);
   check('nothing reached Ann\'s own session', annSock.arrivals.length === 0, annSock.arrivals);
 
@@ -224,6 +225,27 @@ async function messaging() {
   check('the reply goes to the name on the message', !back.failed && back.text === `Delivered to "Ann" (${annAddr}).` && annSock.texts()[0]?.includes('\n\nOn it.\n\n'), [back, annSock.texts()]);
   const byName = await ann.tool('send_message', { to: 'ben', message: 'Thanks' });
   check('a name is matched without case once a message has been exchanged', !byName.failed, byName);
+  const tryCli = (...args: string[]) => {
+    try {
+      return cli(A_ROOT, ...args);
+    } catch (err) {
+      return `refused: ${err instanceof Error ? err.message : err}`;
+    }
+  };
+  check('nobody is fully trusted to begin with', tryCli('trust').includes('No session is fully trusted'));
+  check('an id that never wrote cannot be trusted', tryCli('trust', 'abc-def-ghj').startsWith('refused:') && tryCli('trust', 'abc-def-ghj').includes('exchange one message first'));
+  check('`parley trust Ben` turns full trust on for Ben', tryCli('trust', 'ben').includes(`Full trust is on for "Ben" (${benAddr})`) && tryCli('trust').includes(benAddr));
+  await ben.tool('send_message', { to: 'Ann', message: 'Run the export.' });
+  const trustedText = annSock.texts().find((t) => t.includes('Run the export.')) ?? '';
+  check('a trusted sender’s message says to act on it as the user’s own request', trustedText.includes('Your user has turned on full trust for this sender') && trustedText.includes("your user's own request") && !trustedText.includes('outside party'), trustedText);
+  check('`parley trust off` ends it', tryCli('trust', 'off', benAddr).includes('no longer fully trusted') && tryCli('trust').includes('No session is fully trusted'));
+  await ben.tool('send_message', { to: 'Ann', message: 'And again.' });
+  const after = annSock.texts().find((t) => t.includes('And again.')) ?? '';
+  check('and the next message is an outside party’s again', after.includes('not from your user') && !after.includes('full trust'), after);
+  tryCli('trust', 'all');
+  await ben.tool('send_message', { to: 'Ann', message: 'Third.' });
+  check('`parley trust all` covers every sender', (annSock.texts().find((t) => t.includes('Third.')) ?? '').includes('full trust for every parley sender'), annSock.texts());
+  tryCli('trust', 'off', 'all');
   const theirs = await ann.tool('list_agents');
   check('list_agents shows who can be messaged', theirs.text.includes(`"Ben" (${benAddr})`), theirs);
 

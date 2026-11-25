@@ -15,7 +15,7 @@ const UNLINKED_CHECK_MS = 30_000;
 const LINK_FRESH_MS = 10 * 60_000;
 
 export type AttestFile = { att: string; issuer: string; sync?: boolean; fetchedAt: string };
-export type Verified = { domain: string | null; kind: 'account' | 'visitor' };
+export type Verified = { domain: string | null; kind: 'account' | 'visitor'; sub: string };
 export type People = { mine: { address: string; name: string; machine?: string }[]; online?: string[] };
 
 export type AccountState = { url?: string; link?: string; error?: string; verified?: Verified };
@@ -217,7 +217,7 @@ export function startAccount(
             : refusal === 'not linked'
               ? 'this machine is not linked to a parley account yet'
               : error,
-        verified: a ? { domain: a.domain, kind: a.kind } : undefined,
+        verified: a ? { domain: a.domain, kind: a.kind, sub: a.sub } : undefined,
       };
     },
     async link(to: string | undefined): Promise<{ url: string; link: string }> {

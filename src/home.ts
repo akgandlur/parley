@@ -87,6 +87,17 @@ export function loadContacts(): Record<string, Contact> {
   );
 }
 
+// Ids whose messages their person has said to act on like their own
+// requests, or 'all'. Only the person changes it: `parley trust`, which the
+// /parley:trust command runs with no model in between.
+export function loadTrusted(): string[] {
+  return existsSync(join(ROOT, 'trusted.json')) ? readJson<{ ids: string[] }>(ROOT, 'trusted.json').ids : [];
+}
+
+export function saveTrusted(ids: string[]) {
+  writeJson(ROOT, 'trusted.json', { ids: [...new Set(ids)].sort() });
+}
+
 export function saveContact(address: string, name: string, key: string) {
   const contacts = loadContacts();
   const known = contacts[address];
