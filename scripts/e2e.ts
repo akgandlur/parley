@@ -509,7 +509,7 @@ async function oneLine() {
   const named = await a.tool('to', { text: 'Line B and by name, with spaces in it' });
   check('a name with spaces and a message are told apart', !named.failed && named.text.startsWith('Delivered') && (await until(() => bSock.texts().find((t) => t.includes('\nand by name, with spaces in it\n')))), { named, got: bSock.texts() });
   const list = await a.tool('to', { text: '' });
-  check('with someone known, no name lists whom it can message', list.text.includes('Ask the user who to message') && list.text.includes(`"Line B" (${bAddr})`), list);
+  check('with someone known, no name lists whom it can message', list.text.includes('Show the user this whole list') && list.text.includes(`"Line B" (${bAddr})`), list);
   const nobody = await a.tool('to', { text: 'zed hello' });
   check('a name nobody has says so and lists who there is', nobody.text.includes('named like "zed"') && nobody.text.includes('"Line B"'), nobody);
   check('its own id is refused', (await a.tool('to', { text: `${aAddr} hi` })).failed);

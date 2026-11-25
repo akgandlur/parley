@@ -22350,7 +22350,7 @@ var TALK_KEEP_MS = 7 * 24 * 3600000;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.9.5";
+var VERSION = "0.9.6";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -23012,7 +23012,7 @@ async function runMcp() {
   const linkText = (url, link) => [`This machine is not linked to a parley account yet, so it cannot send or receive. Open this link and sign in at ${url} when it asks; it works for 15 minutes, and is needed once per machine:`, link].join(`
 `);
   server.registerTool("to", {
-    description: "What the /parley:to command runs, in one call: it gives this session a parley name if it has none, then sends, or says exactly what is missing. `text` is what the user typed after the command: nothing, or an id or name, or an id or name followed by the message. Tell the user what it returns and nothing else.",
+    description: "What the /parley:to command runs, in one call: it gives this session a parley name if it has none, then sends, or says exactly what is missing. `text` is what the user typed after the command: nothing, or an id or name, or an id or name followed by the message. Tell the user what it returns and nothing else; a list it returns is shown whole, not summed up.",
     inputSchema: { text: string2().max(TEXT_MAX + 200).describe("What the user typed after /parley:to, unchanged") }
   }, ({ text: typed }) => reply(async () => {
     await starting;
@@ -23065,7 +23065,7 @@ Once that is done, the user runs /parley:to again.`;
         ].filter((l) => l !== undefined).join(`
 `);
       }
-      return [head, "Ask the user who to message, by name or id, and what to say. They can also give an id that is not listed.", ...r.lines, "", `This session is "${s.name}" (${s.address}).`].filter((l) => l !== undefined).join(`
+      return [head, "Show the user this whole list as it is, every session on its own line with its id and whether it is open, then ask who to message and what to say. They can also give an id that is not listed.", ...r.lines, "", `This session is "${s.name}" (${s.address}).`].filter((l) => l !== undefined).join(`
 `);
     }
     const label = who.name === who.address ? who.address : `"${who.name}" (${who.address})`;

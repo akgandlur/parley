@@ -231,7 +231,7 @@ export async function runMcp() {
     'to',
     {
       description:
-        'What the /parley:to command runs, in one call: it gives this session a parley name if it has none, then sends, or says exactly what is missing. `text` is what the user typed after the command: nothing, or an id or name, or an id or name followed by the message. Tell the user what it returns and nothing else.',
+        'What the /parley:to command runs, in one call: it gives this session a parley name if it has none, then sends, or says exactly what is missing. `text` is what the user typed after the command: nothing, or an id or name, or an id or name followed by the message. Tell the user what it returns and nothing else; a list it returns is shown whole, not summed up.',
       inputSchema: { text: z.string().max(TEXT_MAX + 200).describe('What the user typed after /parley:to, unchanged') },
     },
     ({ text: typed }) =>
@@ -279,7 +279,7 @@ export async function runMcp() {
               ...r.lines,
             ].filter((l) => l !== undefined).join('\n');
           }
-          return [head, 'Ask the user who to message, by name or id, and what to say. They can also give an id that is not listed.', ...r.lines, '', `This session is "${s.name}" (${s.address}).`].filter((l) => l !== undefined).join('\n');
+          return [head, 'Show the user this whole list as it is, every session on its own line with its id and whether it is open, then ask who to message and what to say. They can also give an id that is not listed.', ...r.lines, '', `This session is "${s.name}" (${s.address}).`].filter((l) => l !== undefined).join('\n');
         }
         const label = who.name === who.address ? who.address : `"${who.name}" (${who.address})`;
         if (r.here.includes(who)) return `${label} is a session on this machine, which parley is not for. Send it with SendMessage instead.`;
