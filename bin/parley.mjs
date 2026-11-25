@@ -22464,11 +22464,12 @@ function change(label, fn) {
   fn(e);
   save(entries);
 }
-function takeForSending(label, to, trusted) {
+function takeForSending(label, to, trusted, met) {
   const e = entryOf(label);
   if (!trusted && !e.sendTo.includes(to)) {
     note("refused", label, `sending to ${to}`);
-    throw new Error(`the secret ${label} may not be sent to ${to}. Only your user can allow it, by typing /parley:secret share ${label} ${to}. Ask them; do not look for another way to pass it on`);
+    const first = met ? "" : ` This machine has not exchanged a message with ${to}, and that comes first: send it one with send_message and wait for its reply.`;
+    throw new Error(`the secret ${label} may not be sent to ${to}.${first} Only your user can allow it, by typing /parley:secret share ${label} ${to}. Ask them; do not look for another way to pass it on`);
   }
   return { value: valueOf(e), use: e.use.filter((r) => !r.once) };
 }
@@ -22663,7 +22664,7 @@ ${code}`) }, hkdf, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
 }
 
 // src/types.ts
-var VERSION = "0.10.0";
+var VERSION = "0.10.1";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -23534,7 +23535,7 @@ You will be told here when the secret has arrived.`;
   }, ({ to, label }) => named(async (a) => {
     const address = addressFor(to, a.address, accountNames);
     const trusted = loadTrusted();
-    const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes("all"));
+    const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes("all"), !!loadContacts()[address]);
     const name = await a.sendSecret(address, label, value, use);
     note("sent", label, `to "${name}" (${address})`);
     return `The secret ${label} is now in the vault of "${name}" (${address}). Neither session was shown its value.`;

@@ -460,7 +460,7 @@ export async function runMcp() {
       named(async (a) => {
         const address = addressFor(to, a.address, accountNames);
         const trusted = loadTrusted();
-        const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes('all'));
+        const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes('all'), !!loadContacts()[address]);
         const name = await a.sendSecret(address, label, value, use);
         note('sent', label, `to "${name}" (${address})`);
         return `The secret ${label} is now in the vault of "${name}" (${address}). Neither session was shown its value.`;

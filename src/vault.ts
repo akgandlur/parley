@@ -124,11 +124,12 @@ export function removeSecret(label: string) {
 
 // For sending to another session: the value leaves in the sealed message and
 // is returned to no tool.
-export function takeForSending(label: string, to: string, trusted: boolean): { value: string; use: Rule[] } {
+export function takeForSending(label: string, to: string, trusted: boolean, met: boolean): { value: string; use: Rule[] } {
   const e = entryOf(label);
   if (!trusted && !e.sendTo.includes(to)) {
     note('refused', label, `sending to ${to}`);
-    throw new Error(`the secret ${label} may not be sent to ${to}. Only your user can allow it, by typing /parley:secret share ${label} ${to}. Ask them; do not look for another way to pass it on`);
+    const first = met ? '' : ` This machine has not exchanged a message with ${to}, and that comes first: send it one with send_message and wait for its reply.`;
+    throw new Error(`the secret ${label} may not be sent to ${to}.${first} Only your user can allow it, by typing /parley:secret share ${label} ${to}. Ask them; do not look for another way to pass it on`);
   }
   return { value: valueOf(e), use: e.use.filter((r) => !r.once) };
 }
