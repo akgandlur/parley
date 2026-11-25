@@ -183,7 +183,7 @@ async function main() {
         }),
         ...(process.env.PARLEY_RELAY_ISSUERS ?? '').split(',').map((k) => k.trim()).filter(Boolean),
       ];
-      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers, peers: peering() });
+      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers, peers: peering(), talksFile: process.env.PARLEY_RELAY_TALKS });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

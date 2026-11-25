@@ -1,7 +1,7 @@
 // Drives real parley MCP servers through a real relay on this machine. Each
 // stands in a Claude Code session whose socket the script plays; nothing
 // here calls a model.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -824,7 +824,8 @@ async function twoRelays() {
   const urls = [`ws://127.0.0.1:${p1}`, `ws://127.0.0.1:${p2}`];
   // Each relay also finds itself under another spelling of its own address.
   const peers = (i: number) => ({ port: [p1, p2][i]!, hostname: '127.0.0.1', secret: 'between-relays', self: urls[i]!, discover: async () => [...urls, `${urls[i]}/`] });
-  const east = startRelay(0, '127.0.0.1', { peers: peers(0) });
+  const talksFile = join(base, 'talks.json');
+  const east = startRelay(0, '127.0.0.1', { peers: peers(0), talksFile });
   const west = startRelay(0, '127.0.0.1', { peers: peers(1) });
   cleanup.push(() => east.stop(true), () => west.stop(true));
   const at = (r: { port?: number }) => ({ PARLEY_RELAY: `ws://127.0.0.1:${r.port}` });
@@ -854,6 +855,18 @@ async function twoRelays() {
     const { talks } = await status(relay);
     check(`the ${name} relay does not count a session checking its own connection as talking with itself`, talks[eveAddr].length === 1 && talks[walAddr].length === 1, talks);
   }
+  const saved = readFileSync(talksFile, 'utf8');
+  writeFileSync(join(base, 'talks-old.json'), JSON.stringify([...JSON.parse(saved), ['abc-def-ghj', [[walAddr, Date.now() - 8 * 24 * 3600_000]]]]));
+  const restarted = startRelay(0, '127.0.0.1', { talksFile: join(base, 'talks-old.json') });
+  cleanup.push(() => restarted.stop(true));
+  const { talks: kept } = await status(restarted);
+  check('a relay that restarts still knows who talked with whom', kept[eveAddr]?.[0]?.[0] === walAddr && kept[walAddr]?.[0]?.[0] === eveAddr, kept);
+  check('but not from more than seven days ago', kept['abc-def-ghj'] === undefined, kept);
+  check('and what it saved holds ids and times alone, for its own user only', /^[\[\]",\-a-z0-9]+$/.test(saved) && !saved.includes('across') && (statSync(talksFile).mode & 0o777) === 0o600, saved);
+  writeFileSync(join(base, 'talks-bad.json'), 'not json');
+  const bad = startRelay(0, '127.0.0.1', { talksFile: join(base, 'talks-bad.json') });
+  cleanup.push(() => bad.stop(true));
+  check('a saved file that cannot be read does not keep the relay down', (await status(bad)).online.length === 0);
   const outside = await status(east, { 'x-forwarded-for': '203.0.113.9' });
   check('a caller from elsewhere is told who is online and no more', outside.online.length === 2 && outside.talks === undefined, outside);
   const nobody = await eve.tool('send_message', { to: 'abc-def-ghj', message: 'anyone?' });

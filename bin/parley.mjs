@@ -6977,7 +6977,7 @@ var require_dist = __commonJS(function(exports, module) {
 
 // src/cli.ts
 import { resolve6 } from "dns/promises";
-import { existsSync as existsSync8 } from "fs";
+import { existsSync as existsSync9 } from "fs";
 import { join as join11 } from "path";
 
 // src/crypto.ts
@@ -23580,6 +23580,7 @@ ${made.link}`;
 
 // src/relay.ts
 import { randomBytes as randomBytes3, timingSafeEqual } from "node:crypto";
+import { chmodSync as chmodSync4, existsSync as existsSync7, readFileSync as readFileSync5, renameSync as renameSync3, writeFileSync as writeFileSync3 } from "node:fs";
 var RELAY_AUTH2 = "parley relay auth ";
 var HELLO_MS = 1e4;
 var MAX_CONNECTIONS = 500;
@@ -23593,6 +23594,7 @@ var PEER_DIAL_MS = 3000;
 var TALK_SHARE_MS = 60000;
 var TALK_KEEP_MS2 = 7 * 24 * 3600000;
 var MAX_TALKS = 50;
+var TALK_SAVE_MS = 1000;
 var sameSecret = (a, b) => typeof b === "string" && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 var log2 = (...parts) => console.log(new Date().toISOString(), ...parts);
 var LOOPBACK2 = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -23615,6 +23617,41 @@ function startRelay(port, hostname, opts = {}) {
   const dialling = new Set;
   const own = new Set;
   const talks = new Map;
+  const { talksFile } = opts;
+  let talkSave;
+  function dropOldTalks() {
+    const cutoff = Date.now() - TALK_KEEP_MS2;
+    for (const [id, peers] of talks) {
+      for (const [other, at] of peers)
+        if (at < cutoff)
+          peers.delete(other);
+      if (!peers.size)
+        talks.delete(id);
+    }
+  }
+  function saveTalks() {
+    if (!talksFile)
+      return;
+    clearTimeout(talkSave);
+    talkSave = undefined;
+    try {
+      const part = `${talksFile}.part`;
+      writeFileSync3(part, JSON.stringify([...talks].map(([id, peers]) => [id, [...peers]])), { mode: 384 });
+      chmodSync4(part, 384);
+      renameSync3(part, talksFile);
+    } catch (err) {
+      log2(`could not save who talked with whom to ${talksFile}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  if (talksFile && existsSync7(talksFile)) {
+    try {
+      for (const [id, peers] of JSON.parse(readFileSync5(talksFile, "utf8")))
+        talks.set(id, new Map(peers));
+      dropOldTalks();
+    } catch (err) {
+      log2(`could not read who talked with whom from ${talksFile}:`, err instanceof Error ? err.message : err);
+    }
+  }
   function toPeers(frame) {
     const text = JSON.stringify(frame);
     for (const link of links.values())
@@ -23633,18 +23670,14 @@ function startRelay(port, hostname, opts = {}) {
       if (peers.size > MAX_TALKS)
         peers.delete(peers.keys().next().value);
     }
+    if (talksFile)
+      talkSave ??= setTimeout(saveTalks, TALK_SAVE_MS);
     if (share && !known)
       toPeers({ t: "talk", a, b });
   }
   const talkSweep = setInterval(() => {
-    const cutoff = Date.now() - TALK_KEEP_MS2;
-    for (const [id, peers] of talks) {
-      for (const [other, at] of peers)
-        if (at < cutoff)
-          peers.delete(other);
-      if (!peers.size)
-        talks.delete(id);
-    }
+    dropOldTalks();
+    saveTalks();
   }, 3600000);
   function forget(peer) {
     for (const [address, at] of remote)
@@ -23932,6 +23965,8 @@ function startRelay(port, hostname, opts = {}) {
   server.stop = (closeActive) => {
     clearInterval(dialTimer);
     clearInterval(talkSweep);
+    if (talkSave)
+      saveTalks();
     for (const link of links.values())
       link.close();
     peerServer?.stop(closeActive);
@@ -23962,7 +23997,7 @@ function setUp2(name, relay) {
 }
 
 // src/vault.ts
-import { appendFileSync as appendFileSync2, chmodSync as chmodSync4, existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync5 } from "node:fs";
+import { appendFileSync as appendFileSync2, chmodSync as chmodSync5, existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync6 } from "node:fs";
 import { basename as basename2, join as join10 } from "node:path";
 var DIR2 = join10(ROOT, "vault");
 var LABEL2 = /^[a-z0-9][a-z0-9._-]{0,59}$/;
@@ -23982,19 +24017,19 @@ function parseRule2(words) {
   throw new Error("a rule is `run <program> [arguments that must be there]` or `http <host>`, with `once` in front for a single use");
 }
 var ruleText2 = (r) => ("run" in r ? `the program ${r.run}${r.args.length ? `, with ${r.args.join(" ")} among its arguments` : ""}` : `web requests to ${r.http}`) + (r.once ? ", once" : "");
-var all2 = () => existsSync7(join10(DIR2, "secrets.json")) ? readJson(DIR2, "secrets.json") : {};
+var all2 = () => existsSync8(join10(DIR2, "secrets.json")) ? readJson(DIR2, "secrets.json") : {};
 var save2 = (entries) => writeJson(DIR2, "secrets.json", entries, true);
 function note2(what, label, detail) {
   mkdirSync4(DIR2, { recursive: true, mode: 448 });
   const path = join10(DIR2, "log.jsonl");
   appendFileSync2(path, JSON.stringify({ at: new Date().toISOString(), what, label, detail }) + `
 `);
-  chmodSync4(path, 384);
+  chmodSync5(path, 384);
 }
 function readLog(last) {
-  if (!existsSync7(join10(DIR2, "log.jsonl")))
+  if (!existsSync8(join10(DIR2, "log.jsonl")))
     return [];
-  return readFileSync5(join10(DIR2, "log.jsonl"), "utf8").trim().split(`
+  return readFileSync6(join10(DIR2, "log.jsonl"), "utf8").trim().split(`
 `).slice(-last).map((line) => {
     const e = JSON.parse(line);
     return `${e.at.slice(0, 19).replace("T", " ")}  ${e.what}  ${e.label}  ${e.detail}`;
@@ -24122,7 +24157,7 @@ ${l.address}`).join(`
       if (rest[0] !== "link")
         throw new Error("use `parley cloud link`");
       const { home } = pick2();
-      const saved = existsSync8(join11(home, "cloud.json")) ? readJson2(home, "cloud.json").url : undefined;
+      const saved = existsSync9(join11(home, "cloud.json")) ? readJson2(home, "cloud.json").url : undefined;
       const url = flag("--url") ?? saved ?? process.env.PARLEY_CLOUD;
       if (!url)
         throw new Error("no cloud address is known; add --url https://cloud.example.com");
@@ -24219,7 +24254,7 @@ ${ids.map((id) => `  ${label(id)}`).join(`
         }),
         ...(process.env.PARLEY_RELAY_ISSUERS ?? "").split(",").map((k) => k.trim()).filter(Boolean)
       ];
-      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0", { issuers, peers: peering() });
+      const server = startRelay(Number(flag("--port") ?? 8787), flag("--host") ?? "0.0.0.0", { issuers, peers: peering(), talksFile: process.env.PARLEY_RELAY_TALKS });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

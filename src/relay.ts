@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import type { ServerWebSocket } from 'bun';
 import { readAttestation } from './attest';
 import { addressOf, verifyText } from './crypto';
@@ -46,6 +47,7 @@ const PEER_DIAL_MS = 3000;
 const TALK_SHARE_MS = 60_000;
 const TALK_KEEP_MS = 7 * 24 * 3600_000;
 const MAX_TALKS = 50;
+const TALK_SAVE_MS = 1000;
 
 const sameSecret = (a: string, b: unknown) =>
   typeof b === 'string' && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -63,7 +65,7 @@ const bump = (counts: Map<string, number>, key: string, by: number) => {
 
 // The relay only learns who is online and who is talking to whom. Payloads
 // are signed and sealed between the two ends before they get here.
-export function startRelay(port: number, hostname: string, opts: { issuers?: string[]; peers?: Peering } = {}) {
+export function startRelay(port: number, hostname: string, opts: { issuers?: string[]; peers?: Peering; talksFile?: string } = {}) {
   const issuers = opts.issuers ?? [];
   const accounts = issuers.length > 0;
   const online = new Map<string, ServerWebSocket<Conn>>();
@@ -78,8 +80,42 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
   // Addresses that turned out to be this relay under another spelling.
   const own = new Set<string>();
 
-  // Who each id has exchanged messages with and when last, in memory only.
+  // Who each id has exchanged messages with and when last: in memory, and in
+  // `talksFile` if the relay is given one.
   const talks = new Map<string, Map<string, number>>();
+  const { talksFile } = opts;
+  let talkSave: ReturnType<typeof setTimeout> | undefined;
+
+  function dropOldTalks() {
+    const cutoff = Date.now() - TALK_KEEP_MS;
+    for (const [id, peers] of talks) {
+      for (const [other, at] of peers) if (at < cutoff) peers.delete(other);
+      if (!peers.size) talks.delete(id);
+    }
+  }
+
+  function saveTalks() {
+    if (!talksFile) return;
+    clearTimeout(talkSave);
+    talkSave = undefined;
+    try {
+      const part = `${talksFile}.part`;
+      writeFileSync(part, JSON.stringify([...talks].map(([id, peers]) => [id, [...peers]])), { mode: 0o600 });
+      chmodSync(part, 0o600);
+      renameSync(part, talksFile);
+    } catch (err) {
+      log(`could not save who talked with whom to ${talksFile}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  if (talksFile && existsSync(talksFile)) {
+    try {
+      for (const [id, peers] of JSON.parse(readFileSync(talksFile, 'utf8')) as [string, [string, number][]][]) talks.set(id, new Map(peers));
+      dropOldTalks();
+    } catch (err) {
+      log(`could not read who talked with whom from ${talksFile}:`, err instanceof Error ? err.message : err);
+    }
+  }
 
   function toPeers(frame: object) {
     const text = JSON.stringify(frame);
@@ -98,15 +134,13 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
       peers.set(other, now);
       if (peers.size > MAX_TALKS) peers.delete(peers.keys().next().value as string);
     }
+    if (talksFile) talkSave ??= setTimeout(saveTalks, TALK_SAVE_MS);
     if (share && !known) toPeers({ t: 'talk', a, b });
   }
 
   const talkSweep = setInterval(() => {
-    const cutoff = Date.now() - TALK_KEEP_MS;
-    for (const [id, peers] of talks) {
-      for (const [other, at] of peers) if (at < cutoff) peers.delete(other);
-      if (!peers.size) talks.delete(id);
-    }
+    dropOldTalks();
+    saveTalks();
   }, 3600_000);
 
   function forget(peer: string) {
@@ -400,6 +434,7 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
   server.stop = (closeActive?: boolean) => {
     clearInterval(dialTimer);
     clearInterval(talkSweep);
+    if (talkSave) saveTalks();
     for (const link of links.values()) link.close();
     void peerServer?.stop(closeActive);
     return stop(closeActive);

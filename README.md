@@ -233,7 +233,9 @@ server. `src/ratchet.ts` is all of it.
 - This code has not been audited. It uses Node's own primitives (X25519,
   HKDF, HMAC-SHA256, AES-256-GCM, Ed25519) and follows a published design,
   but nobody outside has reviewed it.
-- The relay sees who talks to whom, when, and how much.
+- The relay sees who talks to whom, when, and how much. With
+  `PARLEY_RELAY_TALKS` set to a file, as on the hosted relay, it saves the ids
+  that talked and when last, for seven days, so a restart does not lose them.
 - A name is whatever the sender typed. Only the id is proven, and for a
   verified side the domain of its owner's email.
 - An id is short: nine letters, about 42 bits of its key. A second key with
