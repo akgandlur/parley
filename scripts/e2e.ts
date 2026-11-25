@@ -849,6 +849,11 @@ async function twoRelays() {
     const seen = await status(relay);
     check(`the ${name} relay tells its own machine who is online and who talked with whom`, seen.online.length === 2 && seen.talks[eveAddr]?.[0]?.[0] === walAddr && seen.talks[walAddr]?.[0]?.[0] === eveAddr && !seen.talks['abc-def-ghj'], seen);
   }
+  await Bun.sleep(22_000);
+  for (const [name, relay] of [['east', east], ['west', west]] as const) {
+    const { talks } = await status(relay);
+    check(`the ${name} relay does not count a session checking its own connection as talking with itself`, talks[eveAddr].length === 1 && talks[walAddr].length === 1, talks);
+  }
   const outside = await status(east, { 'x-forwarded-for': '203.0.113.9' });
   check('a caller from elsewhere is told who is online and no more', outside.online.length === 2 && outside.talks === undefined, outside);
   const nobody = await eve.tool('send_message', { to: 'abc-def-ghj', message: 'anyone?' });

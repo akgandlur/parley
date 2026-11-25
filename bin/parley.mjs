@@ -23621,6 +23621,8 @@ function startRelay(port, hostname, opts = {}) {
       link.send(text);
   }
   function talked(a, b, share) {
+    if (a === b)
+      return;
     const now = Date.now();
     const known = now - (talks.get(a)?.get(b) ?? 0) < TALK_SHARE_MS;
     for (const [id, other] of [[a, b], [b, a]]) {

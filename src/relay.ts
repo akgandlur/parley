@@ -87,6 +87,8 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
   }
 
   function talked(a: string, b: string, share: boolean) {
+    // A session sends to itself to see that the relay still answers.
+    if (a === b) return;
     const now = Date.now();
     const known = now - (talks.get(a)?.get(b) ?? 0) < TALK_SHARE_MS;
     for (const [id, other] of [[a, b], [b, a]] as const) {
