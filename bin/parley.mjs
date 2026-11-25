@@ -6982,10 +6982,13 @@ import { join as join8 } from "path";
 
 // src/crypto.ts
 import {
+  createCipheriv,
   createHash,
   createPrivateKey,
   createPublicKey,
+  diffieHellman,
   generateKeyPairSync,
+  hkdfSync,
   sign,
   verify
 } from "node:crypto";
@@ -7035,6 +7038,37 @@ function verifyText(publicKey, text, sig) {
     format: "jwk"
   });
   return verify(null, Buffer.from(text), key, Buffer.from(sig, "base64url"));
+}
+var P = 2n ** 255n - 19n;
+function power(base, exp) {
+  let out = 1n;
+  base %= P;
+  for (;exp > 0n; exp >>= 1n) {
+    if (exp & 1n)
+      out = out * base % P;
+    base = base * base % P;
+  }
+  return out;
+}
+function exchangeKeyOf(publicKey) {
+  const raw = Buffer.from(publicKey, "base64url");
+  raw[31] = raw[31] & 127;
+  const y = raw.reduceRight((n, byte) => n << 8n | BigInt(byte), 0n);
+  let u = (1n + y) * power((1n - y + P) % P, P - 2n) % P;
+  const out = Buffer.alloc(32);
+  for (let i = 0;i < 32; i++, u >>= 8n)
+    out[i] = Number(u & 255n);
+  return createPublicKey({ key: { kty: "OKP", crv: "X25519", x: out.toString("base64url") }, format: "jwk" });
+}
+function sealTo08(theirKey, plaintext) {
+  const pair = generateKeyPairSync("x25519");
+  const eph = jwkField(pair.publicKey, "x");
+  const shared = diffieHellman({ privateKey: pair.privateKey, publicKey: exchangeKeyOf(theirKey) });
+  const key = Buffer.from(hkdfSync("sha256", shared, Buffer.from(`${eph}
+${theirKey}`), Buffer.from("parley message"), 32));
+  const cipher = createCipheriv("aes-256-gcm", key, Buffer.alloc(12));
+  const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  return { eph, box: body.toString("base64url") };
 }
 
 // src/attest.ts
@@ -22087,14 +22121,14 @@ import { join as join4 } from "node:path";
 
 // src/ratchet.ts
 import {
-  createCipheriv,
+  createCipheriv as createCipheriv2,
   createDecipheriv,
   createHash as createHash3,
   createHmac,
   createPublicKey as createPublicKey2,
-  diffieHellman,
+  diffieHellman as diffieHellman2,
   generateKeyPairSync as generateKeyPairSync2,
-  hkdfSync
+  hkdfSync as hkdfSync2
 } from "node:crypto";
 var MAX_SKIP = 200;
 var TAG = 16;
@@ -22102,11 +22136,11 @@ function newPair() {
   const pair = generateKeyPairSync2("x25519");
   return { publicKey: pair.publicKey.export({ format: "jwk" }).x, privateKey: pair.privateKey };
 }
-var dh = (mine, theirs) => diffieHellman({
+var dh = (mine, theirs) => diffieHellman2({
   privateKey: mine,
   publicKey: createPublicKey2({ key: { kty: "OKP", crv: "X25519", x: theirs }, format: "jwk" })
 });
-var hkdf = (ikm, salt, info, bytes) => Buffer.from(hkdfSync("sha256", ikm, salt, Buffer.from(info), bytes));
+var hkdf = (ikm, salt, info, bytes) => Buffer.from(hkdfSync2("sha256", ikm, salt, Buffer.from(info), bytes));
 function rootStep(root, shared) {
   const out = hkdf(shared, root, "parley ratchet root", 64);
   return [out.subarray(0, 32), out.subarray(32)];
@@ -22166,7 +22200,7 @@ function seal(r, plaintext) {
   r.sending = chain;
   const h = { dh: r.mine.publicKey, pn: r.pn, n: r.ns++ };
   const { key, nonce } = cipherKeys(messageKey);
-  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const cipher = createCipheriv2("aes-256-gcm", key, nonce);
   cipher.setAAD(Buffer.concat([r.ad, headerBytes(h)]));
   const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
   return { h, c: body.toString("base64url") };
@@ -22242,7 +22276,7 @@ var TALK_KEEP_MS = 7 * 24 * 3600000;
 var LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 // src/types.ts
-var VERSION = "0.9.1";
+var VERSION = "0.9.2";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -22252,6 +22286,8 @@ var CONNECT_WAIT_MS = 15000;
 var PROBE_EVERY_MS = 20000;
 var PROBE_WAIT_MS = 1e4;
 var ANSWER_MS = 15000;
+var TOLD_AGAIN_MS = 10 * 60000;
+var HOW_TO_UPDATE = "To update parley, its user runs `claude plugin marketplace update parley && claude plugin update parley@parley` in a terminal, then /reload-plugins in Claude Code.";
 
 class Offline extends Error {
 }
@@ -22282,7 +22318,7 @@ async function retireOldNode(home, log) {
   }
   log(`stopped the older parley node (pid ${info.pid})`);
 }
-async function startAgent(home, log, onMessage) {
+async function startAgent(home, log, onMessage, onNotice) {
   if (typeof WebSocket === "undefined") {
     throw new Error("parley needs Node 22 or newer (or Bun)");
   }
@@ -22306,6 +22342,7 @@ async function startAgent(home, log, onMessage) {
   const convs = new Map;
   const acks = new Map;
   const seen = new Set;
+  const told = new Map;
   const account = startAccount(home, me, log, (att) => {
     if (socket && ready)
       socket.send(JSON.stringify({ t: "renew", att }));
@@ -22464,9 +22501,34 @@ async function startAgent(home, log, onMessage) {
     log(`${from} showed a different key than this id had before, so it is not answered`);
     return false;
   }
+  function otherVersion(from, p) {
+    if (!Number.isInteger(p?.v) || p.speaks === 3)
+      return;
+    if (p.v < 3 && (typeof p.key !== "string" || addressOf(p.key) !== from))
+      return;
+    const asked = convs.get(from)?.offered !== undefined;
+    if (asked && p.v < 3)
+      drop(from, new Error(`${from} is on a parley older than 0.9, which this one cannot talk with. It has been sent a note saying it has to update`));
+    if (Date.now() - (told.get(from) ?? 0) < TOLD_AGAIN_MS)
+      return;
+    told.set(from, Date.now());
+    if (p.v > 3) {
+      return onNotice(`parley: ${from} tried to reach this session from a newer parley than this one (${VERSION}), and the two cannot talk. ${HOW_TO_UPDATE}`);
+    }
+    if (!asked) {
+      onNotice(`parley: ${from} tried to reach this session, but it is on a parley older than 0.9, which this one cannot talk with. Nothing it sent arrived. It has been sent a note saying it has to update.`);
+    }
+    const id = randomBytes(9).toString("base64url");
+    const text = `This is an automatic note from parley, not from the session itself. This session is on parley ${VERSION}, and yours is older than 0.9: the two cannot talk, so nothing you send here arrives. ${HOW_TO_UPDATE} From 0.9 on, each machine is linked once to a parley account.`;
+    const { eph, box } = sealTo08(p.key, JSON.stringify({ id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
+    relaySend(from, `note:${id}`, { v: 2, kind: "msg", key: me.publicKey, eph, box, sig: signText(me, `parley message
+${from}
+${eph}
+${box}`) });
+  }
   function onPeer(from, p) {
     if (p?.v !== 3)
-      return;
+      return otherVersion(from, p);
     const conv = convs.get(from);
     if (p.kind === "hs1") {
       if (!knownKey(from, p.key) || !checkOffer(p, address))
@@ -22526,7 +22588,7 @@ async function startAgent(home, log, onMessage) {
       seen.add(id);
       const verified = verify(inner.att, key, from);
       saveContact(from, name, key);
-      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at) });
+      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at), urgent: inner.urgent === true });
     }
     if (convs.get(from) !== conv || !conv.ratchet)
       return;
@@ -22541,6 +22603,7 @@ async function startAgent(home, log, onMessage) {
       const mine = conv;
       try {
         relaySend(to, `hs:${to}`, { v: 3, kind: "hs1", ...conv.offered.hello });
+        relaySend(to, "older?", { v: 2, kind: "key?", key: me.publicKey, speaks: 3 });
       } catch (err) {
         convs.delete(to);
         throw err;
@@ -22554,10 +22617,10 @@ async function startAgent(home, log, onMessage) {
     await conv.ready;
     return conv;
   }
-  async function sendOnce(to, text) {
+  async function sendOnce(to, text, urgent) {
     const conv = await converse(to);
     const id = randomBytes(9).toString("base64url");
-    const sealed = seal(conv.ratchet, JSON.stringify({ t: "msg", id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
+    const sealed = seal(conv.ratchet, JSON.stringify({ t: "msg", id, name: me.name, text, at: new Date().toISOString(), att: account.att(), urgent: urgent || undefined }));
     return new Promise((resolve, reject) => {
       acks.set(id, { to, resolve, reject });
       setTimeout(() => {
@@ -22584,15 +22647,15 @@ async function startAgent(home, log, onMessage) {
       relay: { connected: ready, error: ready ? undefined : relayError },
       account: account.state()
     }),
-    async send(to, text) {
+    async send(to, text, urgent = false) {
       if (text.length > TEXT_MAX)
         throw new Error(`a message is at most ${TEXT_MAX} characters`);
       if (to === address)
         throw new Error("that is this session's own id");
       try {
-        return await sendOnce(to, text).catch((err) => {
+        return await sendOnce(to, text, urgent).catch((err) => {
           if (err instanceof Stale)
-            return sendOnce(to, text);
+            return sendOnce(to, text, urgent);
           throw err;
         });
       } catch (err) {
@@ -22721,24 +22784,67 @@ function replyTo(m) {
   const hits = callable("").filter((n) => sameName(n.name, m.from.name));
   return hits.length === 1 && hits[0]?.address === m.from.address ? m.from.name : m.from.address;
 }
-function shown(m) {
-  return [
-    `parley message from "${m.from.name}" (${m.from.address}, ${verifiedText(m.from.verified)}):`,
-    "",
-    m.text,
-    "",
-    `It came through parley, so reply with parley's send_message to "${replyTo(m)}", not SendMessage.`
-  ].join(`
+var sender = (m) => `"${m.from.name}" (${m.from.address}, ${verifiedText(m.from.verified)})`;
+var URGENT = "marked urgent by its sender";
+function shown(ms) {
+  const [m] = ms;
+  if (ms.length === 1 && m) {
+    return [
+      `parley message from ${sender(m)}${m.urgent ? `, ${URGENT}` : ""}:`,
+      "",
+      m.text,
+      "",
+      `It came through parley, so reply with parley's send_message to "${replyTo(m)}", not SendMessage.`
+    ].join(`
+`);
+  }
+  const bySender = new Map;
+  for (const one of ms)
+    bySender.set(one.from.address, [...bySender.get(one.from.address) ?? [], one]);
+  const lines = [`${ms.length} parley messages came in close together, from ${bySender.size === 1 ? "one session" : `${bySender.size} sessions`}. They are in the order they arrived, by sender.`];
+  for (const group of bySender.values()) {
+    const last = group[group.length - 1];
+    lines.push("", `From ${sender(last)}, to answer with send_message to "${replyTo(last)}":`);
+    group.forEach((one, i) => lines.push("", `${i + 1}.${one.urgent ? ` (${URGENT})` : ""} ${one.text}`));
+  }
+  lines.push("", "They came through parley, so reply with parley's send_message, not SendMessage.");
+  return lines.join(`
 `);
 }
+var HOLD_MS = Number(process.env.PARLEY_HOLD_SECONDS ?? 30) * 1000;
+if (!(HOLD_MS >= 0))
+  throw new Error("PARLEY_HOLD_SECONDS has to be a number of seconds, 0 or more");
 async function runMcp() {
   const server = new McpServer({ name: "parley", version: VERSION }, { instructions: INSTRUCTIONS });
   let agent;
   let held;
   let starting;
   const unread = [];
+  const waiting = [];
+  let holdUntil = 0;
+  let holdTimer;
+  function release() {
+    holdTimer = undefined;
+    if (!waiting.length)
+      return;
+    holdUntil = Date.now() + HOLD_MS;
+    hand(shown(waiting.splice(0)));
+  }
   async function deliver(m) {
-    const content = shown(m);
+    if (m.urgent) {
+      const earlier = waiting.filter((w) => w.from.address === m.from.address);
+      for (const w of earlier)
+        waiting.splice(waiting.indexOf(w), 1);
+      return hand(shown([...earlier, m]));
+    }
+    if (!waiting.length && Date.now() >= holdUntil) {
+      holdUntil = Date.now() + HOLD_MS;
+      return hand(shown([m]));
+    }
+    waiting.push(m);
+    holdTimer ??= setTimeout(release, Math.max(0, holdUntil - Date.now()));
+  }
+  async function hand(content) {
     if (canInject()) {
       try {
         return await inject(content);
@@ -22753,7 +22859,7 @@ async function runMcp() {
     agent = undefined;
     take(local.address);
     held = local;
-    agent = await startAgent(local.home, log, deliver);
+    agent = await startAgent(local.home, log, deliver, (text) => void hand(text));
   }
   const reply = async (fn) => {
     try {
@@ -22826,14 +22932,15 @@ async function runMcp() {
 `);
   }));
   server.registerTool("send_message", {
-    description: "Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.",
+    description: "Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. When several messages reach a session close together, it gets the first at once and the rest together about half a minute later. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.",
     inputSchema: {
       to: string2().max(100).describe("A parley id like kfq-mxa-tzp, or a name list_agents shows"),
-      message: string2().min(1).max(TEXT_MAX)
+      message: string2().min(1).max(TEXT_MAX),
+      urgent: boolean2().optional().describe("The message goes in at once, not held with others. Only when the other session cannot go on without it, or something is about to go wrong. It is shown as marked urgent by you.")
     }
-  }, ({ to, message }) => named(async (a) => {
+  }, ({ to, message, urgent }) => named(async (a) => {
     const address = addressFor(to, a.address);
-    const name = await a.send(address, message);
+    const name = await a.send(address, message, urgent === true);
     return `Delivered to "${name}" (${address}).`;
   }));
   server.registerTool("safety_number", {
@@ -22852,8 +22959,29 @@ It is the same on their side if nobody is in the middle. Your user compares it w
     return `Give your user this link. They open it while signed in to ${made.url}, and it works for 15 minutes. Use list_agents afterwards to see that the machine is linked:
 ${made.link}`;
   }));
-  process.stdin.on("end", () => process.exit(0));
-  process.stdin.on("close", () => process.exit(0));
+  let closing = false;
+  async function close() {
+    if (closing)
+      return;
+    closing = true;
+    clearTimeout(holdTimer);
+    const left = waiting.splice(0);
+    if (left.length) {
+      try {
+        await inject(shown(left));
+      } catch {
+        const a = agent;
+        const senders = new Map(left.map((m) => [m.from.address, left.filter((o) => o.from.address === m.from.address).length]));
+        const notes = [...senders].map(([to, n]) => a?.send(to, `This is an automatic note from parley, not from the session itself. "${a.name}" closed before reading ${n === 1 ? "the message" : `the ${n} messages`} you sent it in the last half minute. Send again once it is open.`));
+        await Promise.race([Promise.allSettled(notes), new Promise((r) => setTimeout(r, 4000))]);
+      }
+    }
+    process.exit(0);
+  }
+  process.stdin.on("end", close);
+  process.stdin.on("close", close);
+  process.on("SIGTERM", close);
+  process.on("SIGINT", close);
   await server.connect(new StdioServerTransport);
   const resumed = mine();
   if (resumed) {

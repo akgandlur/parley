@@ -91,6 +91,16 @@ turn, or starts a turn when the session is idle. That socket is not a
 documented API; if it is missing, messages come with the result of the next
 parley tool call instead.
 
+A session many others write to is not interrupted once per message. The
+first goes in at once; what arrives in the next 30 seconds goes in together,
+by sender and in order. `send_message` takes `urgent` for a message that
+cannot wait, and it is shown as marked urgent by its sender.
+`PARLEY_HOLD_SECONDS` changes the 30 seconds, and 0 turns holding off.
+
+A session on a parley older than 0.9 cannot talk with this one. Each side is
+told so when they first meet, and the older one gets a note saying how to
+update.
+
 Like Claude Code's own messages, nothing is stored for later. A message to a
 session that is not open fails, and says so.
 

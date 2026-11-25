@@ -41,7 +41,7 @@ const {
 } = process.env;
 // Nor may they see the real sessions open on this machine.
 const CLAUDE_DIR = join(base, 'claude');
-const ENV = { ...REAL, CLAUDE_CONFIG_DIR: CLAUDE_DIR };
+const ENV = { ...REAL, CLAUDE_CONFIG_DIR: CLAUDE_DIR, PARLEY_HOLD_SECONDS: '0' };
 
 async function until<T>(get: () => T | undefined, ms = 8000): Promise<T | undefined> {
   for (const deadline = Date.now() + ms; Date.now() < deadline; await Bun.sleep(50)) {
@@ -86,6 +86,7 @@ function fakeSession() {
     token,
     arrivals,
     texts: () => arrivals.map((a) => String(a.frame?.message?.content ?? '')),
+    stop: () => server.close(),
   };
 }
 
@@ -93,10 +94,10 @@ type Reply = { isError?: boolean; content: { text: string }[] };
 
 // One Claude Code session's MCP server. `session` stands in for the id
 // Claude Code gives each session.
-async function agent(root: string, session: string, env: Record<string, string> = {}) {
+async function agent(root: string, session: string, env: Record<string, string> = {}, run = RUN) {
   const transport = new StdioClientTransport({
-    command: RUN[0] ?? 'bun',
-    args: [...RUN.slice(1), 'mcp'],
+    command: run[0] ?? 'bun',
+    args: [...run.slice(1), 'mcp'],
     env: { ...ENV, PARLEY_HOME: root, PARLEY_RELAY: relayUrl, CLAUDE_CODE_SESSION_ID: session, ...env } as Record<string, string>,
     stderr: 'pipe',
   });
@@ -398,6 +399,95 @@ async function olderNode() {
   check('and connects in its place', set.text.includes('a name this machine already had') && (await dee.tool('list_agents')).text.includes('Connected to the relay.'), set);
   old.close();
   await dee.close();
+}
+
+// The real 0.8 plugin, as it was published, against this version.
+async function olderVersion() {
+  console.log('\n# a session on parley 0.8 meets this one');
+  const old = join(base, 'parley-0.8.mjs');
+  const built = Bun.spawnSync(['git', 'show', '6c0e92b:bin/parley.mjs'], { cwd: join(import.meta.dir, '..') });
+  if (built.exitCode !== 0) throw new Error(`could not read the 0.8 plugin from git: ${built.stderr}`);
+  writeFileSync(old, built.stdout);
+  const [oldSock, newSock, otherSock] = [fakeSession(), fakeSession(), fakeSession()];
+  const olive = await agent(join(base, 'machine-old'), 'session-olive', oldSock.env, ['node', old]);
+  const nina = await agent(join(base, 'machine-new'), 'session-nina', newSock.env);
+  const otto = await agent(join(base, 'machine-new'), 'session-otto', otherSock.env);
+  const oliveAddr = addressIn((await olive.tool('setup', { name: 'Olive' })).text);
+  const ninaAddr = addressIn((await nina.tool('setup', { name: 'Nina' })).text);
+  const ottoAddr = addressIn((await otto.tool('setup', { name: 'Otto' })).text);
+
+  const started = Date.now();
+  const sent = await nina.tool('send_message', { to: oliveAddr, message: 'hello from 0.9' });
+  check('sending to it fails at once and says it is on an older parley', sent.failed && sent.text.includes('older than 0.9') && Date.now() - started < 5000, { sent, ms: Date.now() - started });
+  const note = await until(() => oldSock.texts().find((t) => t.includes('automatic note from parley')));
+  check('it gets a note it can read, with how to update', note?.includes('"Nina"') && note.includes('claude plugin update parley@parley') && note.includes(VERSION), oldSock.texts());
+  check('the sender is not told a second time by a notice', !newSock.texts().some((t) => t.includes('tried to reach')), newSock.texts());
+
+  const back = await olive.tool('send_message', { to: ottoAddr, message: 'hello from 0.8' });
+  check('its own message does not get through', back.failed, back);
+  const notice = await until(() => otherSock.texts().find((t) => t.includes('tried to reach this session')));
+  check('the session it tried is told who tried and why nothing arrived', notice?.includes(oliveAddr) && notice.includes('older than 0.9'), otherSock.texts());
+  const second = await until(() => (oldSock.texts().filter((t) => t.includes('automatic note from parley')).length === 2 ? true : undefined));
+  check('and it gets the note from that session too', second, oldSock.texts());
+  await olive.tool('send_message', { to: ottoAddr, message: 'again' });
+  await new Promise((r) => setTimeout(r, 500));
+  check('a second try within ten minutes repeats neither', otherSock.texts().filter((t) => t.includes('tried to reach')).length === 1 && oldSock.texts().filter((t) => t.includes('automatic note')).length === 2, { other: otherSock.texts(), old: oldSock.texts() });
+  const fine = await nina.tool('send_message', { to: ottoAddr, message: 'between two on this version' });
+  check('two sessions on this version still talk, with no notice', !fine.failed && !newSock.texts().concat(otherSock.texts()).some((t) => t.includes('newer parley')), fine);
+  for (const a of [olive, nina, otto]) await a.close();
+}
+
+async function manySenders() {
+  console.log('\n# a session many others write to');
+  const socks = [fakeSession(), fakeSession(), fakeSession()];
+  const root = join(base, 'machine-busy');
+  const hub = await agent(root, 'session-hub', { ...socks[0]!.env, PARLEY_HOLD_SECONDS: '3' });
+  const one = await agent(join(base, 'machine-one'), 'session-one', socks[1]!.env);
+  const two = await agent(join(base, 'machine-two'), 'session-two', socks[2]!.env);
+  const hubAddr = addressIn((await hub.tool('setup', { name: 'Hub' })).text);
+  await one.tool('setup', { name: 'One' });
+  await two.tool('setup', { name: 'Two' });
+  const got = () => socks[0]!.texts();
+
+  const first = await one.tool('send_message', { to: hubAddr, message: 'first from one' });
+  await until(() => got()[0]);
+  check('the first message goes in at once', !first.failed && got().length === 1 && got()[0]!.startsWith('parley message from "One"'), got());
+  const later = [
+    await two.tool('send_message', { to: hubAddr, message: 'first from two' }),
+    await one.tool('send_message', { to: hubAddr, message: 'second from one' }),
+    await two.tool('send_message', { to: hubAddr, message: 'second from two' }),
+  ];
+  check('what follows is delivered to its senders at once and held from the session', later.every((r) => !r.failed && r.text.startsWith('Delivered to "Hub"')) && got().length === 1, { later, got: got() });
+  const rush = await one.tool('send_message', { to: hubAddr, message: 'stop, the branch is gone', urgent: true });
+  const urgent = await until(() => got()[1]);
+  check('an urgent one goes in at once, marked as its sender\'s word, with what that sender had waiting before it', !rush.failed && urgent?.includes('marked urgent by its sender') && urgent.includes('1. second from one') && urgent.indexOf('second from one') < urgent.indexOf('stop, the branch is gone') && !urgent.includes('from two'), got());
+  const batch = await until(() => got()[2], 6000);
+  check('the rest go in together once the hold is over, by sender and in order', batch?.startsWith('2 parley messages came in close together, from one session') && batch.indexOf('1. first from two') < batch.indexOf('2. second from two') && batch.includes('send_message to "Two"'), got());
+  await new Promise((r) => setTimeout(r, 3200));
+  await one.tool('send_message', { to: hubAddr, message: 'much later' });
+  const calm = await until(() => got()[3]);
+  check('and a message after a quiet spell goes in at once again', calm?.startsWith('parley message from "One"') && got().length === 4, got());
+  await hub.close();
+
+  const [stillSock, goneSock] = [fakeSession(), fakeSession()];
+  const still = await agent(join(base, 'machine-still'), 'session-still', { ...stillSock.env, PARLEY_HOLD_SECONDS: '60' });
+  const gone = await agent(join(base, 'machine-gone'), 'session-gone', { ...goneSock.env, PARLEY_HOLD_SECONDS: '60' });
+  const stillAddr = addressIn((await still.tool('setup', { name: 'Still' })).text);
+  const goneAddr = addressIn((await gone.tool('setup', { name: 'Gone' })).text);
+  for (const to of [stillAddr, goneAddr]) {
+    await one.tool('send_message', { to, message: 'goes in' });
+    await one.tool('send_message', { to, message: 'is held' });
+  }
+  await until(() => (stillSock.texts().length === 1 && goneSock.texts().length === 1 ? true : undefined));
+  await still.close();
+  const late = await until(() => stillSock.texts()[1]);
+  check('when parley stops with a message held and the session still there, it goes in then', late?.includes('is held'), stillSock.texts());
+  goneSock.stop();
+  const before = socks[1]!.texts().length;
+  await gone.close();
+  const note = await until(() => socks[1]!.texts()[before]);
+  check('when the session is gone too, the sender is told it was not read', note?.includes('"Gone" closed before reading the message you sent') && goneSock.texts().length === 1, socks[1]!.texts());
+  for (const a of [one, two]) await a.close();
 }
 
 const cloudIssuer = newIdentity('Test cloud');
@@ -805,6 +895,8 @@ try {
   await names(pair);
   await olderContacts(pair);
   await olderNode();
+  await olderVersion();
+  await manySenders();
   await accountRelays();
   await accounts();
   await linkedMachine();

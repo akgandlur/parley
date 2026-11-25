@@ -4,23 +4,28 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import { startAccount, type AccountState, type Verified } from './account';
 import { readAttestation } from './attest';
-import { addressOf, signText } from './crypto';
+import { addressOf, sealTo08, signText } from './crypto';
 import { isSavedKey, loadConfig, loadContacts, loadIdentity, readJson, saveContact } from './home';
 import { answer, canSeal, checkOffer, finish, offer, open, safetyNumber, seal, type Ratchet } from './ratchet';
 import { RELAY_AUTH } from './relay';
-import { TEXT_MAX } from './types';
+import { TEXT_MAX, VERSION } from './types';
 
 const RETRY_MAX_MS = 15_000;
 const CONNECT_WAIT_MS = 15_000;
 const PROBE_EVERY_MS = 20_000;
 const PROBE_WAIT_MS = 10_000;
 const ANSWER_MS = 15_000;
+const TOLD_AGAIN_MS = 10 * 60_000;
+
+export const HOW_TO_UPDATE =
+  'To update parley, its user runs `claude plugin marketplace update parley && claude plugin update parley@parley` in a terminal, then /reload-plugins in Claude Code.';
 
 export type Incoming = {
   id: string;
   from: { name: string; address: string; verified?: Verified };
   text: string;
   at: string;
+  urgent: boolean;
 };
 
 export type AgentState = {
@@ -76,6 +81,7 @@ export async function startAgent(
   home: string,
   log: (...parts: unknown[]) => void,
   onMessage: (m: Incoming) => Promise<void>,
+  onNotice: (text: string) => void,
 ) {
   if (typeof WebSocket === 'undefined') {
     throw new Error('parley needs Node 22 or newer (or Bun)');
@@ -103,6 +109,7 @@ export async function startAgent(
   const convs = new Map<string, Conv>();
   const acks = new Map<string, { to: string; resolve: (name: string) => void; reject: (e: Error) => void }>();
   const seen = new Set<string>();
+  const told = new Map<string, number>();
 
   const account = startAccount(home, me, log, (att) => {
     if (socket && ready) socket.send(JSON.stringify({ t: 'renew', att }));
@@ -265,8 +272,30 @@ export async function startAgent(
     return false;
   }
 
+  // A session on another version of parley cannot read this one's messages,
+  // nor this one its. Each side is told which of the two has to update. A 0.8
+  // session reads only its own format, so the note to it is written in that.
+  function otherVersion(from: string, p: any) {
+    if (!Number.isInteger(p?.v) || p.speaks === 3) return;
+    if (p.v < 3 && (typeof p.key !== 'string' || addressOf(p.key) !== from)) return;
+    const asked = convs.get(from)?.offered !== undefined;
+    if (asked && p.v < 3) drop(from, new Error(`${from} is on a parley older than 0.9, which this one cannot talk with. It has been sent a note saying it has to update`));
+    if (Date.now() - (told.get(from) ?? 0) < TOLD_AGAIN_MS) return;
+    told.set(from, Date.now());
+    if (p.v > 3) {
+      return onNotice(`parley: ${from} tried to reach this session from a newer parley than this one (${VERSION}), and the two cannot talk. ${HOW_TO_UPDATE}`);
+    }
+    if (!asked) {
+      onNotice(`parley: ${from} tried to reach this session, but it is on a parley older than 0.9, which this one cannot talk with. Nothing it sent arrived. It has been sent a note saying it has to update.`);
+    }
+    const id = randomBytes(9).toString('base64url');
+    const text = `This is an automatic note from parley, not from the session itself. This session is on parley ${VERSION}, and yours is older than 0.9: the two cannot talk, so nothing you send here arrives. ${HOW_TO_UPDATE} From 0.9 on, each machine is linked once to a parley account.`;
+    const { eph, box } = sealTo08(p.key, JSON.stringify({ id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
+    relaySend(from, `note:${id}`, { v: 2, kind: 'msg', key: me.publicKey, eph, box, sig: signText(me, `parley message\n${from}\n${eph}\n${box}`) });
+  }
+
   function onPeer(from: string, p: any) {
-    if (p?.v !== 3) return;
+    if (p?.v !== 3) return otherVersion(from, p);
     const conv = convs.get(from);
     if (p.kind === 'hs1') {
       if (!knownKey(from, p.key) || !checkOffer(p as Hello, address)) return;
@@ -321,7 +350,7 @@ export async function startAgent(
       seen.add(id);
       const verified = verify(inner.att, key, from);
       saveContact(from, name, key);
-      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at) });
+      await onMessage({ id, from: { name, address: from, verified }, text: String(inner.text), at: String(inner.at), urgent: inner.urgent === true });
     }
     if (convs.get(from) !== conv || !conv.ratchet) return;
     relaySend(from, `ack:${id}`, { v: 3, kind: 'm', ...seal(conv.ratchet, JSON.stringify({ t: 'ack', id, name: me.name })) });
@@ -337,6 +366,8 @@ export async function startAgent(
       const mine = conv;
       try {
         relaySend(to, `hs:${to}`, { v: 3, kind: 'hs1', ...conv.offered.hello });
+        // Only a session older than 0.9 answers this, which is how it is known to be one.
+        relaySend(to, 'older?', { v: 2, kind: 'key?', key: me.publicKey, speaks: 3 });
       } catch (err) {
         convs.delete(to);
         throw err;
@@ -351,10 +382,10 @@ export async function startAgent(
     return conv;
   }
 
-  async function sendOnce(to: string, text: string): Promise<string> {
+  async function sendOnce(to: string, text: string, urgent: boolean): Promise<string> {
     const conv = await converse(to);
     const id = randomBytes(9).toString('base64url');
-    const sealed = seal(conv.ratchet as Ratchet, JSON.stringify({ t: 'msg', id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
+    const sealed = seal(conv.ratchet as Ratchet, JSON.stringify({ t: 'msg', id, name: me.name, text, at: new Date().toISOString(), att: account.att(), urgent: urgent || undefined }));
     return new Promise<string>((resolve, reject) => {
       acks.set(id, { to, resolve, reject });
       setTimeout(() => {
@@ -383,12 +414,12 @@ export async function startAgent(
       account: account.state(),
     }),
     // Resolves with the name the other side answered under, once it has the message.
-    async send(to: string, text: string): Promise<string> {
+    async send(to: string, text: string, urgent = false): Promise<string> {
       if (text.length > TEXT_MAX) throw new Error(`a message is at most ${TEXT_MAX} characters`);
       if (to === address) throw new Error("that is this session's own id");
       try {
-        return await sendOnce(to, text).catch((err) => {
-          if (err instanceof Stale) return sendOnce(to, text);
+        return await sendOnce(to, text, urgent).catch((err) => {
+          if (err instanceof Stale) return sendOnce(to, text, urgent);
           throw err;
         });
       } catch (err) {

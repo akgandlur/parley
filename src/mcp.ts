@@ -53,15 +53,36 @@ function replyTo(m: Incoming): string {
 
 // What the receiving Claude reads. Claude Code wraps it as a message from
 // another of its own sessions, so this says where it came from and how to answer.
-function shown(m: Incoming): string {
-  return [
-    `parley message from "${m.from.name}" (${m.from.address}, ${verifiedText(m.from.verified)}):`,
-    '',
-    m.text,
-    '',
-    `It came through parley, so reply with parley's send_message to "${replyTo(m)}", not SendMessage.`,
-  ].join('\n');
+const sender = (m: Incoming) => `"${m.from.name}" (${m.from.address}, ${verifiedText(m.from.verified)})`;
+const URGENT = 'marked urgent by its sender';
+
+function shown(ms: Incoming[]): string {
+  const [m] = ms;
+  if (ms.length === 1 && m) {
+    return [
+      `parley message from ${sender(m)}${m.urgent ? `, ${URGENT}` : ''}:`,
+      '',
+      m.text,
+      '',
+      `It came through parley, so reply with parley's send_message to "${replyTo(m)}", not SendMessage.`,
+    ].join('\n');
+  }
+  const bySender = new Map<string, Incoming[]>();
+  for (const one of ms) bySender.set(one.from.address, [...(bySender.get(one.from.address) ?? []), one]);
+  const lines = [`${ms.length} parley messages came in close together, from ${bySender.size === 1 ? 'one session' : `${bySender.size} sessions`}. They are in the order they arrived, by sender.`];
+  for (const group of bySender.values()) {
+    const last = group[group.length - 1]!;
+    lines.push('', `From ${sender(last)}, to answer with send_message to "${replyTo(last)}":`);
+    group.forEach((one, i) => lines.push('', `${i + 1}.${one.urgent ? ` (${URGENT})` : ''} ${one.text}`));
+  }
+  lines.push('', "They came through parley, so reply with parley's send_message, not SendMessage.");
+  return lines.join('\n');
 }
+
+// A session many others write to would be interrupted once per message. The
+// first goes in at once; what follows within the hold goes in together.
+const HOLD_MS = Number(process.env.PARLEY_HOLD_SECONDS ?? 30) * 1000;
+if (!(HOLD_MS >= 0)) throw new Error('PARLEY_HOLD_SECONDS has to be a number of seconds, 0 or more');
 
 export async function runMcp() {
   const server = new McpServer({ name: 'parley', version: VERSION }, { instructions: INSTRUCTIONS });
@@ -70,8 +91,33 @@ export async function runMcp() {
   let starting: Promise<void> | undefined;
   const unread: string[] = [];
 
+  const waiting: Incoming[] = [];
+  let holdUntil = 0;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function release() {
+    holdTimer = undefined;
+    if (!waiting.length) return;
+    holdUntil = Date.now() + HOLD_MS;
+    void hand(shown(waiting.splice(0)));
+  }
+
   async function deliver(m: Incoming) {
-    const content = shown(m);
+    if (m.urgent) {
+      // With what its sender has waiting, so that sender's messages stay in order.
+      const earlier = waiting.filter((w) => w.from.address === m.from.address);
+      for (const w of earlier) waiting.splice(waiting.indexOf(w), 1);
+      return hand(shown([...earlier, m]));
+    }
+    if (!waiting.length && Date.now() >= holdUntil) {
+      holdUntil = Date.now() + HOLD_MS;
+      return hand(shown([m]));
+    }
+    waiting.push(m);
+    holdTimer ??= setTimeout(release, Math.max(0, holdUntil - Date.now()));
+  }
+
+  async function hand(content: string) {
     if (canInject()) {
       try {
         return await inject(content);
@@ -87,7 +133,7 @@ export async function runMcp() {
     agent = undefined;
     take(local.address);
     held = local;
-    agent = await startAgent(local.home, log, deliver);
+    agent = await startAgent(local.home, log, deliver, (text) => void hand(text));
   }
 
   const reply = async (fn: () => Promise<string>) => {
@@ -180,16 +226,20 @@ export async function runMcp() {
     'send_message',
     {
       description:
-        'Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.',
+        'Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. When several messages reach a session close together, it gets the first at once and the rest together about half a minute later. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.',
       inputSchema: {
         to: z.string().max(100).describe('A parley id like kfq-mxa-tzp, or a name list_agents shows'),
         message: z.string().min(1).max(TEXT_MAX),
+        urgent: z
+          .boolean()
+          .optional()
+          .describe('The message goes in at once, not held with others. Only when the other session cannot go on without it, or something is about to go wrong. It is shown as marked urgent by you.'),
       },
     },
-    ({ to, message }) =>
+    ({ to, message, urgent }) =>
       named(async (a) => {
         const address = addressFor(to, a.address);
-        const name = await a.send(address, message);
+        const name = await a.send(address, message, urgent === true);
         return `Delivered to "${name}" (${address}).`;
       }),
   );
@@ -223,8 +273,33 @@ export async function runMcp() {
   );
 
   // This process holds the relay connection, so it must not outlive the session.
-  process.stdin.on('end', () => process.exit(0));
-  process.stdin.on('close', () => process.exit(0));
+  // What is still held goes in now: this process ends on a plugin reload too,
+  // with the session still there to read it. If the session is gone, the
+  // senders were told "Delivered" for something nobody read, so they are told.
+  let closing = false;
+  async function close() {
+    if (closing) return;
+    closing = true;
+    clearTimeout(holdTimer);
+    const left = waiting.splice(0);
+    if (left.length) {
+      try {
+        await inject(shown(left));
+      } catch {
+        const a = agent;
+        const senders = new Map(left.map((m) => [m.from.address, left.filter((o) => o.from.address === m.from.address).length]));
+        const notes = [...senders].map(([to, n]) =>
+          a?.send(to, `This is an automatic note from parley, not from the session itself. "${a.name}" closed before reading ${n === 1 ? 'the message' : `the ${n} messages`} you sent it in the last half minute. Send again once it is open.`),
+        );
+        await Promise.race([Promise.allSettled(notes), new Promise((r) => setTimeout(r, 4000))]);
+      }
+    }
+    process.exit(0);
+  }
+  process.stdin.on('end', close);
+  process.stdin.on('close', close);
+  process.on('SIGTERM', close);
+  process.on('SIGINT', close);
   await server.connect(new StdioServerTransport());
 
   // The server restarts inside one Claude Code session (a plugin reload, a
