@@ -1,0 +1,38 @@
+# A tag like v0.11.0 builds the parley binary for every platform and puts
+# them on a GitHub release. `parley relay` runs from one of these on any
+# server, and install.sh will fetch them once parley runs outside Claude Code.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            file: parley-darwin-arm64
+          - target: bun-darwin-x64
+            file: parley-darwin-x64
+          - target: bun-linux-x64
+            file: parley-linux-x64
+          - target: bun-linux-arm64
+            file: parley-linux-arm64
+          - target: bun-windows-x64
+            file: parley-windows-x64.exe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun build src/cli.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.file }}
+      - run: cd dist && sha256sum ${{ matrix.file }} > ${{ matrix.file }}.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ matrix.file }}
+            dist/${{ matrix.file }}.sha256

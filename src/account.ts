@@ -15,8 +15,11 @@ const UNLINKED_CHECK_MS = 30_000;
 const LINK_FRESH_MS = 10 * 60_000;
 
 export type AttestFile = { att: string; issuer: string; sync?: boolean; fetchedAt: string };
-export type Verified = { domain: string | null; kind: 'account' | 'visitor'; sub: string };
-export type People = { mine: { address: string; name: string; machine?: string }[]; online?: string[] };
+export type Verified = { domain: string | null; kind: 'account' | 'visitor'; sub: string; nets: string[] };
+export type Session = { address: string; name: string; machine?: string };
+// A network this account is on, with everyone on it and their sessions.
+export type Network = { id: string; name: string; people: { email: string; names: Session[] }[] };
+export type People = { mine: Session[]; online?: string[]; nets?: Network[] };
 
 export type AccountState = { url?: string; link?: string; error?: string; verified?: Verified };
 
@@ -138,10 +141,14 @@ export function startAccount(
     if (!res.ok || typeof reply.att !== 'string' || typeof reply.issuer !== 'string') {
       throw new Error(reply.error ?? `the cloud answered ${res.status}`);
     }
-    readAttestation(reply.att, [reply.issuer], me.publicKey);
+    const fresh = readAttestation(reply.att, [reply.issuer], me.publicKey);
     refusal = undefined;
+    // A proof with time left is kept, unless the account's networks changed:
+    // joining one has to show on the next message, not the next day.
     const keep =
-      attest?.issuer === reply.issuer && own(attest).exp * 1000 - Date.now() >= RENEW_LEFT_MS;
+      attest?.issuer === reply.issuer &&
+      own(attest).exp * 1000 - Date.now() >= RENEW_LEFT_MS &&
+      (own(attest).nets ?? []).join() === (fresh.nets ?? []).join();
     attest = {
       att: keep && attest ? attest.att : reply.att,
       issuer: reply.issuer,
@@ -196,7 +203,7 @@ export function startAccount(
     });
     const reply = (await res.json().catch(() => ({}))) as Partial<People> & { error?: string };
     if (!res.ok || !Array.isArray(reply.mine)) throw new Error(reply.error ?? `the cloud answered ${res.status}`);
-    return { mine: reply.mine, online: reply.online };
+    return { mine: reply.mine, online: reply.online, nets: Array.isArray(reply.nets) ? reply.nets : undefined };
   }
 
   return {
@@ -217,7 +224,7 @@ export function startAccount(
             : refusal === 'not linked'
               ? 'this machine is not linked to a parley account yet'
               : error,
-        verified: a ? { domain: a.domain, kind: a.kind, sub: a.sub } : undefined,
+        verified: a ? { domain: a.domain, kind: a.kind, sub: a.sub, nets: a.nets ?? [] } : undefined,
       };
     },
     async link(to: string | undefined): Promise<{ url: string; link: string }> {

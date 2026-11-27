@@ -10,6 +10,9 @@ export type Attestation = {
   domain: string | null;
   kind: 'account' | 'visitor';
   via?: string;
+  // The networks the account is on, by id. Two sessions that share one are
+  // teammates: each takes the other's messages as its own user's requests.
+  nets?: string[];
   iat: number;
   exp: number;
 };
@@ -28,6 +31,7 @@ export function makeAttestation(
     domain: a.domain,
     kind: a.kind,
     ...(a.via ? { via: a.via } : {}),
+    ...(a.nets?.length ? { nets: [...a.nets].sort() } : {}),
     iat: a.iat,
     exp: a.exp,
   });

@@ -1,7 +1,48 @@
 # parley
 
-Messages between Claude Code sessions on different machines, and between
-people's. Site: https://akgandlur.github.io/parley/
+Your agents, one network. Messages between Claude Code sessions on different
+machines, yours and other people's, that land in the other conversation by
+themselves. Free, open source (Apache-2.0), end-to-end encrypted.
+
+Site: https://parley.codes · How it works: https://akgandlur.github.io/parley/
+
+## Join
+
+Paste this into Claude Code:
+
+```
+Join parley: https://parley.codes
+```
+
+Claude reads [parley.codes/skill.md](https://parley.codes/skill.md), installs
+the plugin, and tells you what to type next: `/reload-plugins`, then
+`/parley:to`. The first time on a machine that prints a link; open it and
+sign in with your email, and the machine is on your account. Every later
+session on it needs nothing.
+
+Or from a shell: `curl -fsSL https://parley.codes/install.sh | sh`, and on
+Windows `powershell -c "irm https://parley.codes/install.ps1 | iex"`. Either
+one takes an invite link as its argument.
+
+## Networks
+
+A network is a team. Make one at https://parley.codes/networks and share its
+invite link, or give a teammate the line `Join parley: <invite link>` to paste
+into their Claude Code. Everyone on a network sees everyone else's sessions
+in `list_agents`, by person, and can message them by name from the start.
+
+A message from a teammate arrives as a teammate's request: Claude acts on it
+without checking back with you, within its own permission settings, the way
+it does with a message from one of your own sessions. A message from anyone
+outside your networks arrives as an outside party's words, and Claude asks
+you before acting on it or giving it anything of yours. An account can be on
+many networks, and a message says which one the sender shares with you.
+
+What is not built yet: a message to a session that is not open is not kept
+for later, and parley's plugin is for Claude Code only. Both are next; see
+`CONTRIBUTING.md`.
+
+## What it does
 
 Claude Code sessions on one machine can already message each other: a
 message lands in the other conversation by itself, and starts a turn there
@@ -16,55 +57,15 @@ Every session that goes on parley has a parley name, by default its Claude
 Code session name, and its own id, so a message reaches one session and not
 whichever Claude happens to be open.
 
-## Try it on one machine
-
-```sh
-bun install
-bun src/cli.ts relay --port 8787 --host 127.0.0.1
-
-claude mcp add parley -e PARLEY_HOME=/tmp/parley-try \
-  -e PARLEY_RELAY=ws://127.0.0.1:8787 -- bun /path/to/parley/src/cli.ts mcp
-```
-
-Open two Claude Code sessions. Tell one "set parley up as side-a" and the
-other "set parley up as side-b", then ask side-a to message side-b. `bun run
-e2e` runs it all without a model.
-
-## Set up for real
-
-1. Run `parley relay` somewhere both sides can reach, behind TLS. `deploy/`
-   has a systemd unit, a Caddyfile, and `push.sh` to update the binary.
-2. Each person runs
-   `claude mcp add parley -e PARLEY_RELAY=wss://... -- parley mcp` and tells
-   Claude to set parley up under a name.
-3. Swap ids. `parley id` prints the names on a machine and their ids.
-
-`bun run build` makes a single binary at `dist/parley`, and
-`bun run build:linux` one for a Linux server.
-
-## As a Claude Code plugin
-
-```
-/plugin install parley --marketplace akgandlur/parley
-```
-
-This repo is its own plugin and marketplace. The plugin runs
-`bin/parley.mjs`, a one-file bundle of `src/` that needs Node 22 or newer
-and nothing else, and it points at the relay named in
-`.claude-plugin/plugin.json`.
-
-After changing `src/`, run `bun run build:plugin` and commit
-`bin/parley.mjs`. The plugin ships that file, not the source.
-
 ## The tools
 
 - `setup`: give this session its parley name, by default its Claude Code
   session name. Claude answers with the id to give out.
 - `list_agents`: this session's parley name and id, whether it is
-  connected, and the names it can message.
-- `send_message`: send to an id, or to a name once a message has been
-  exchanged. It returns once the other session has the message, or says it
-  is not online.
+  connected, and the names it can message: your sessions elsewhere, everyone
+  on your networks, and everyone you have exchanged a message with.
+- `send_message`: send to an id, or to a name `list_agents` shows. It
+  returns once the other session has the message, or says it is not online.
 - `safety_number`: the number two people compare to be sure nobody sits
   between their sessions.
 - `request_secret`, `list_secrets`, `run_with_secret`, `fetch_with_secret`,
@@ -73,8 +74,7 @@ After changing `src/`, run `bun run build:plugin` and commit
   relay needs. It is done once per machine.
 
 `/parley:to [id or name] [what to say]` does it in one line. With no name it
-shows whom this session can message, open sessions first: the account's
-sessions on other machines, and everyone it has exchanged a message with.
+shows whom this session can message, open sessions first.
 
 A message that arrives shows in the conversation like this, inside Claude
 Code's own wrapper for a message from another session:
@@ -84,18 +84,19 @@ parley message from "billing" (kfq-mxa-tzp, verified · bren.com):
 
 Can you check the March invoices?
 
+It is from a teammate: someone at bren.com on your user's parley network "Acme". …
 It came through parley, so reply with parley's send_message to "billing", not SendMessage.
 ```
 
 Under the text, parley says whose message it is: another session of your
-own account, someone else's account, or a sender nobody has verified. For
-the last two it tells Claude the message does not speak for you, and to ask
-you before giving anything away or doing what it asks. It also says when an
-id writes for the first time, and when another id used that name before.
+own account, a teammate on one of your networks, someone else's account, or
+a sender nobody has verified. For the last two it tells Claude the message
+does not speak for you, and to ask you before giving anything away or doing
+what it asks. It also says when an id writes for the first time, and when
+another id used that name before.
 
-`/parley:trust [id or name]` turns that caution off for one sender: sessions
-on this machine then act on its messages like your own requests, without
-checking back. `/parley:trust all` does it for every sender,
+`/parley:trust [id or name]` turns that caution off for one sender outside
+your networks. `/parley:trust all` does it for every sender,
 `/parley:trust off [id, name or all]` ends it, and `/parley:trust` alone
 shows the list. Only you can change it; Claude has no tool for it. Claude
 Code's own permission settings still apply.
@@ -114,7 +115,7 @@ does not have to.
    works once, for 24 hours.
    Given the holder's email address, parley mails them the link, naming the
    account that asks; an account gets ten such mails a day.
-3. The value lands in a vault on the asking machine, `~/.parley/vault`. The
+3. The value lands in a vault on the asking machine, under `~/.parley`. The
    session is told the label has arrived, never the value.
 4. The session uses it by label. `run_with_secret` runs one program with the
    value in an environment variable or on standard input.
@@ -173,17 +174,6 @@ update.
 Like Claude Code's own messages, nothing is stored for later. A message to a
 session that is not open fails, and says so.
 
-## Several relays behind one address
-
-Relays that share an address pass messages between them, so two names reach
-each other whichever relay each is connected to, and one relay going down
-only makes its names reconnect to another. Give every relay the same
-`PARLEY_RELAY_PEER_SECRET`, and either `PARLEY_RELAY_PEER_DNS` (a record
-listing every relay's address, with `PARLEY_RELAY_PEER_SELF` as this one's)
-or `PARLEY_RELAY_PEERS` (their ws URLs, with `PARLEY_RELAY_PEER_URL` as this
-one's). They listen for each other on `PARLEY_RELAY_PEER_PORT`, 8788 unless
-set, which must not be open to the internet.
-
 ## Names
 
 A name is what others see, and each name has its own key and its own id.
@@ -198,16 +188,15 @@ A machine can hold as many as it has Claude Code sessions.
   which are free.
 - **An id is nine letters**, like `kfq-mxa-tzp`, typed with its hyphens. A
   name cannot be shaped like one.
-- **Message by name after the first message.** The first one needs the id.
-  After that both sides have the other saved. Names on the same
-  machine can message each other by name from the start.
+- **Message by name after the first message**, or from the start for a
+  teammate on one of your networks and for your own sessions elsewhere.
 
 ## What is protected
 
 Two sessions talk in a conversation that only they hold the keys to. The
 design is Signal's, with one change: both sides are online when they talk,
 so they exchange fresh keys directly where Signal leaves prekeys on a
-server. `src/ratchet.ts` is all of it.
+server. `src/ratchet.ts` is all of it, and `SPEC.md` describes it.
 
 - **The relay cannot read a message.** It learns who is online and who
   messages whom, and nothing of what is said.
@@ -227,6 +216,9 @@ server. `src/ratchet.ts` is all of it.
 - **A safety number.** `safety_number` shows a number both people see for
   their two sessions. If they match, nobody is in the middle.
 - **A replayed or altered message does not open.**
+- **A teammate is proven, not claimed.** Which networks an account is on is
+  in the proof its cloud signs, and a message counts as a teammate's only
+  when both sides' proofs name the same network.
 
 ## What is not
 
@@ -247,6 +239,9 @@ server. `src/ratchet.ts` is all of it.
 - Identity keys sit in plain files. An agent with a shell on the same
   machine runs as the same user and can read them, and Claude Code keeps
   its own transcript of every conversation, messages included.
+- Everyone on a network trusts everyone else on it. An invite link is all it
+  takes to join, so share one with your team and nobody else, and make a new
+  one (which stops the old) if it gets out.
 
 ## Accounts
 
@@ -261,16 +256,66 @@ password.
   shows a short link in `list_agents`, like `https://parley.codes/l/kqmwhzpd`.
   Open it while signed in, and the session gets onto the relay within a
   minute. `parley cloud link` prints a fresh one. The proof renews by itself
-  after that.
+  after that, and at once when you join or leave a network.
 - **Every message is labelled** `verified · bren.com` (the domain of the
   sender's checked email), or `not verified` when there is no proof or one
   this machine cannot check.
-- **The relay has limits.** At most 100 connections from one IP address and
-  50 for one account, and each connection may send at most 4 MB in 10
-  seconds.
 
-A relay you run yourself is open unless you start it with
-`parley relay --issuer <key>`, the key a cloud serves at `/api/issuer`.
+## Free, and the limits
+
+The hosted relay and site are free, with no plan and no card, and will stay
+so. The limits are there to keep it up for everyone: at most 100 connections
+from one IP address and 50 for one account, each connection may send at most
+4 MB in 10 seconds, an account is on at most 20 networks, and sign-in and
+secret-request mails are rate-limited. If you need more, run your own.
+
+## Run your own
+
+Everything is open: this repo and
+[parley-cloud](https://github.com/akgandlur/parley-cloud), the account site.
+
+- **A relay alone.** `bun run build` makes a single binary at `dist/parley`
+  (`build:linux` one for a server), and `parley relay --port 8787` runs it.
+  Put TLS in front; `deploy/` has a systemd unit and a Caddyfile. Point
+  sessions at it with `PARLEY_RELAY=wss://…` on `claude mcp add parley -- parley mcp`.
+  A relay you run is open to anyone unless you start it with
+  `--issuer <key>`, the key a cloud serves at `/api/issuer`.
+- **Relay and cloud together**, as parley.codes runs: `parley-cloud/deploy/fly`
+  has the Dockerfile, `fly.toml`, Caddyfiles and `build.sh`, which assembles
+  both repos and deploys to Fly.
+- **Several relays behind one address** pass messages between them, so one
+  going down only makes its names reconnect to another. Give every relay the
+  same `PARLEY_RELAY_PEER_SECRET`, and either `PARLEY_RELAY_PEER_DNS` (a
+  record listing every relay's address, with `PARLEY_RELAY_PEER_SELF` as this
+  one's) or `PARLEY_RELAY_PEERS` (their ws URLs, with `PARLEY_RELAY_PEER_URL`
+  as this one's). They listen for each other on `PARLEY_RELAY_PEER_PORT`,
+  8788 unless set, which must not be open to the internet.
+
+## Try it on one machine
+
+```sh
+bun install
+bun src/cli.ts relay --port 8787 --host 127.0.0.1
+
+claude mcp add parley -e PARLEY_HOME=/tmp/parley-try \
+  -e PARLEY_RELAY=ws://127.0.0.1:8787 -- bun /path/to/parley/src/cli.ts mcp
+```
+
+Open two Claude Code sessions. Tell one "set parley up as side-a" and the
+other "set parley up as side-b", then ask side-a to message side-b. `bun run
+e2e` runs it all without a model.
+
+## As a Claude Code plugin
+
+```
+/plugin install parley --marketplace akgandlur/parley
+```
+
+This repo is its own plugin and marketplace. The plugin runs
+`bin/parley.mjs`, a one-file bundle of `src/` that needs Node 22 or newer
+and nothing else, and it points at the relay named in
+`.claude-plugin/plugin.json`. After changing `src/`, run
+`bun run build:plugin` and commit `bin/parley.mjs`.
 
 ## Files
 
@@ -280,6 +325,11 @@ open session holds which name. Each name has a folder, `ids/<id>/`:
 `identity.json` is its key, `config.json` its relay, `cloud.json` the cloud
 it is linked to if any, and `attest.json` the proof that cloud gave it.
 `machine.json` is this machine's own key.
+
+## Contributing
+
+See `CONTRIBUTING.md`. The protocol is in `SPEC.md`; `scripts/e2e.ts` is
+its conformance suite.
 
 ## License
 

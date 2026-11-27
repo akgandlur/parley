@@ -543,7 +543,7 @@ async function oneLine() {
 
 const cloudIssuer = newIdentity('Test cloud');
 const unix = () => Math.floor(Date.now() / 1000);
-type Account = { sub: string; domain: string | null; banned?: boolean; lifetime?: number };
+type Account = { sub: string; domain: string | null; banned?: boolean; lifetime?: number; nets?: string[]; name?: string };
 
 // A stand-in for the cloud: it checks what a real one must check and gives
 // the accounts it is told about their proofs.
@@ -554,19 +554,32 @@ function startCloudStub() {
     port: 0,
     hostname: '127.0.0.1',
     async fetch(req) {
+      const path = new URL(req.url).pathname;
       // Like a cloud from before short links, so the long one is what is given.
-      if (new URL(req.url).pathname !== '/api/attest') return Response.json({ error: 'nothing here' }, { status: 404 });
+      if (path !== '/api/attest' && path !== '/api/people') return Response.json({ error: 'nothing here' }, { status: 404 });
+      const purpose = path.slice('/api/'.length);
       const text = await req.text();
       const [key, time, sig] = ['x-parley-key', 'x-parley-time', 'x-parley-sig'].map((h) => req.headers.get(h) ?? '');
       const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');
-      const signed = verifyText(key ?? '', `parley-cloud-attest\n${time}\n${digest}`, sig ?? '');
+      const signed = verifyText(key ?? '', `parley-cloud-${purpose}\n${time}\n${digest}`, sig ?? '');
       const m = (JSON.parse(text) as { machine?: { key: string; sig: string } }).machine;
       const vouched = m && verifyText(m.key, `parley-cloud-machine\n${key}`, m.sig) ? machines.get(m.key) : undefined;
       const account = signed ? (accounts.get(key ?? '') ?? vouched) : undefined;
       if (!account) return Response.json({ error: 'not linked' }, { status: 403 });
       if (account.banned) return Response.json({ error: 'banned' }, { status: 403 });
+      if (purpose === 'people') {
+        // The networks this account is on, with everyone else on each.
+        const nets = (account.nets ?? []).map((id) => ({
+          id,
+          name: `Net ${id}`,
+          people: [...accounts]
+            .filter(([k, a]) => k !== key && a.sub !== account.sub && a.nets?.includes(id))
+            .map(([k, a]) => ({ email: `${a.sub}@${a.domain}`, names: [{ address: addressOf(k), name: a.name ?? a.sub }] })),
+        }));
+        return Response.json({ mine: [], nets });
+      }
       const iat = unix();
-      const att = makeAttestation(cloudIssuer, { key: key ?? '', sub: account.sub, domain: account.domain, kind: 'account', iat, exp: iat + (account.lifetime ?? 86400) });
+      const att = makeAttestation(cloudIssuer, { key: key ?? '', sub: account.sub, domain: account.domain, kind: 'account', nets: account.nets, iat, exp: iat + (account.lifetime ?? 86400) });
       return Response.json({ att, issuer: cloudIssuer.publicKey, sync: false });
     },
   });
@@ -671,6 +684,48 @@ function dialRelay(url: string, id: Identity, att?: string, forwardedFor?: strin
       resolve(link);
     };
   });
+}
+
+// Two accounts on one network: each takes the other's messages as its own
+// user's requests, and sees the other's sessions by name.
+async function networks() {
+  console.log('\n# two accounts on one network');
+  const stub = startCloudStub();
+  const gated = startRelay(0, '127.0.0.1', { issuers: [cloudIssuer.publicKey] });
+  cleanup.push(() => gated.stop(true));
+  const env = { PARLEY_CLOUD: stub.url, PARLEY_RELAY: `ws://127.0.0.1:${gated.port}` };
+  const [pamSock, quinnSock] = [fakeSession(), fakeSession()];
+  const pam = await agent(join(base, 'machine-p'), 'session-pam', { ...env, ...pamSock.env });
+  const quinn = await agent(join(base, 'machine-q'), 'session-quinn', { ...env, ...quinnSock.env });
+  const pamAddr = addressIn((await pam.tool('setup', { name: 'Pam' })).text);
+  const quinnAddr = addressIn((await quinn.tool('setup', { name: 'Quinn' })).text);
+  const key = (root: string, addr: string) => readJson<Identity>(join(base, root, 'ids', addr), 'identity.json').publicKey;
+  stub.accounts.set(key('machine-p', pamAddr), { sub: 'pam', domain: 'pam.example', nets: ['t1'], name: 'Pam' });
+  stub.accounts.set(key('machine-q', quinnAddr), { sub: 'quinn', domain: 'quinn.example', nets: ['t1'], name: 'Quinn' });
+  const connected = (a: typeof pam) => eventually(async () => {
+    const r = await a.tool('list_agents');
+    return r.text.includes('Connected to the relay.') ? r : undefined;
+  }, 20_000);
+  const [pamOn] = await Promise.all([connected(pam), connected(quinn)]);
+  check('list_agents shows the network, who is on it, and their sessions', pamOn?.text.includes('On your network "Net t1"') && pamOn.text.includes('quinn@quinn.example:') && pamOn.text.includes(`"Quinn" (${quinnAddr})`), pamOn);
+  const proof = readAttestation(readJson<{ att: string }>(join(base, 'machine-p', 'ids', pamAddr), 'attest.json').att, [cloudIssuer.publicKey], key('machine-p', pamAddr));
+  check('the account proof names the network', JSON.stringify(proof.nets) === '["t1"]', proof);
+  const byName = await pam.tool('send_message', { to: 'quinn', message: 'Deploy at five?' });
+  check('a teammate is messaged by name before any message has been exchanged', !byName.failed && byName.text === `Delivered to "Quinn" (${quinnAddr}).`, byName);
+  const heard = quinnSock.texts().find((t) => t.includes('Deploy at five?'));
+  check('the message says it is a teammate\'s, to act on as the user\'s own request', heard?.includes('It is from a teammate: someone at pam.example on your user\'s parley network "Net t1".') && heard.includes('without checking back') && !heard.includes('outside party'), heard);
+
+  stub.accounts.set(key('machine-q', quinnAddr), { sub: 'quinn', domain: 'quinn.example', nets: [], name: 'Quinn' });
+  const off = await eventually(async () => {
+    const r = await quinn.tool('list_agents');
+    return r.text.includes('On your network') ? undefined : r;
+  }, 10_000);
+  check('an account taken off the network stops seeing it', !!off, off);
+  const after = await pam.tool('send_message', { to: quinnAddr, message: 'Still there?' });
+  const outside = quinnSock.texts().find((t) => t.includes('Still there?'));
+  check('and the next message is an outside party\'s again', !after.failed && outside?.includes('not from your user') && !outside.includes('teammate'), outside);
+  await pam.close();
+  await quinn.close();
 }
 
 async function closedWithin(link: Link, ms: number) {
@@ -971,6 +1026,7 @@ try {
   await oneLine();
   await accountRelays();
   await accounts();
+  await networks();
   await linkedMachine();
   await sessionsHere();
   await twoRelays();
