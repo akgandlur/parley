@@ -27,7 +27,10 @@ the plugin ships that file.
 - A test in `scripts/e2e.ts` that fails without it.
 - No new dependency unless there is no reasonable way around it. parley has
   two: the MCP SDK and zod.
-- Prose in the plain, short style the code uses. Comments say why, not what.
+- Prose in the plain, short style the code uses.
+- No comments unless absolutely necessary. The code explains itself; a
+  comment is for a reason it cannot show (an undocumented API, a limit, a
+  security reason, a compatibility hack), and is one short line.
 - Anything that touches keys, proofs or the relay gets a line in
   `SPEC.md`.
 
@@ -36,9 +39,12 @@ the plugin ships that file.
 | | |
 |---|---|
 | `src/mcp.ts` | the tools Claude sees, and the text it reads |
-| `src/agent.ts` | one session's connection: handshake, sealing, delivery |
+| `src/agent.ts` | one name's connection: handshake, sealing, delivery, mail |
 | `src/ratchet.ts` | the cryptography; nothing else touches keys |
+| `src/prekeys.ts` | the keys a name leaves at the relay, and their private halves |
+| `src/daemon.ts` | the background process that holds names no session does |
 | `src/relay.ts` | the relay: hello, routing, peering, limits |
+| `src/mail.ts` | what the relay keeps for a name that is away |
 | `src/account.ts`, `src/attest.ts` | account proofs from a cloud |
 | `src/vault.ts`, `src/secrets.ts` | secrets: the vault and the request flow |
 | `join/` | what an agent reads to join, and the installers |

@@ -5,10 +5,6 @@ import { readAttestation } from './attest';
 import { signText, type Identity } from './crypto';
 import { machineIdentity, readJson, writeJson } from './home';
 
-// A name linked to a parley account gets from the cloud the proof that lets
-// it onto a relay that needs one, and shows the other side its account's
-// email domain.
-
 const RENEW_LEFT_MS = 18 * 3600_000;
 const CHECK_MS = 2 * 60_000;
 const UNLINKED_CHECK_MS = 30_000;
@@ -17,9 +13,8 @@ const LINK_FRESH_MS = 10 * 60_000;
 export type AttestFile = { att: string; issuer: string; sync?: boolean; fetchedAt: string };
 export type Verified = { domain: string | null; kind: 'account' | 'visitor'; sub: string; nets: string[] };
 export type Session = { address: string; name: string; machine?: string };
-// A network this account is on, with everyone on it and their sessions.
 export type Network = { id: string; name: string; people: { email: string; names: Session[] }[] };
-export type People = { mine: Session[]; online?: string[]; nets?: Network[] };
+export type People = { mine: Session[]; online?: string[]; reachable?: string[]; nets?: Network[] };
 
 export type AccountState = { url?: string; link?: string; error?: string; verified?: Verified };
 
@@ -34,9 +29,6 @@ const originOf = (url: string) => {
   return parsed.origin;
 };
 
-// The link carries no secret of the machine's. Whoever opens it while signed
-// in to the cloud ties this machine to their account, so it goes to the
-// person and is good for a few minutes only.
 function longLinkFor(to: string) {
   const machine = machineIdentity();
   const t = new Date().toISOString();
@@ -50,8 +42,7 @@ function longLinkFor(to: string) {
   return { long: `${to}/link?${query}`, query };
 }
 
-// The full link is some 250 characters, and terminals and chat apps cut it,
-// so the cloud is asked for a short one. A cloud that has none gives 404.
+// The link carries no secret: whoever opens it signed in ties this machine to their account, so it is short-lived.
 export async function linkFor(to: string, log: (...parts: unknown[]) => void = () => {}) {
   const { long, query } = longLinkFor(to);
   try {
@@ -76,13 +67,11 @@ export function startAccount(
   log: (...parts: unknown[]) => void,
   renewed: (att: string) => void,
 ) {
-  // Read with `now` at 0 so an expired proof still says when it ran out.
+  // `now` 0 so an expired proof still says when it ran out.
   const own = (f: AttestFile) => readAttestation(f.att, [f.issuer], me.publicKey, 0);
   let attest = existsSync(join(home, 'attest.json'))
     ? readJson<AttestFile>(home, 'attest.json')
     : undefined;
-  // A proof from before 0.7 carries the id the key had then. It is of no use
-  // now, and the cloud gives a new one.
   if (attest) {
     try {
       own(attest);
@@ -91,13 +80,10 @@ export function startAccount(
       attest = undefined;
     }
   }
-  // cloud.json holds null once a person has turned the cloud off.
   const saved = existsSync(join(home, 'cloud.json'))
     ? readJson<{ url: string | null }>(home, 'cloud.json').url
     : undefined;
-  // The plugin sets PARLEY_CLOUD, and it wins over the saved address so a
-  // plugin update can move everyone to a new one. A proof from the old
-  // address is of no use at the new.
+  // PARLEY_CLOUD wins over the saved cloud so a plugin update can move everyone.
   let url = saved === null ? undefined : (process.env.PARLEY_CLOUD ?? saved);
   if (url) url = originOf(url);
   if (url && url !== saved) {
@@ -143,8 +129,7 @@ export function startAccount(
     }
     const fresh = readAttestation(reply.att, [reply.issuer], me.publicKey);
     refusal = undefined;
-    // A proof with time left is kept, unless the account's networks changed:
-    // joining one has to show on the next message, not the next day.
+    // Joining a network has to show on the next message, not the next day.
     const keep =
       attest?.issuer === reply.issuer &&
       own(attest).exp * 1000 - Date.now() >= RENEW_LEFT_MS &&
@@ -185,7 +170,6 @@ export function startAccount(
 
   void check();
 
-  // The other sessions of this account, and which of them and of `ids` are open now.
   async function people(ids: string[]): Promise<People | undefined> {
     if (!url || !attest) return undefined;
     const body = JSON.stringify({ ids });
@@ -203,13 +187,12 @@ export function startAccount(
     });
     const reply = (await res.json().catch(() => ({}))) as Partial<People> & { error?: string };
     if (!res.ok || !Array.isArray(reply.mine)) throw new Error(reply.error ?? `the cloud answered ${res.status}`);
-    return { mine: reply.mine, online: reply.online, nets: Array.isArray(reply.nets) ? reply.nets : undefined };
+    return { mine: reply.mine, online: reply.online, reachable: Array.isArray(reply.reachable) ? reply.reachable : undefined, nets: Array.isArray(reply.nets) ? reply.nets : undefined };
   }
 
   return {
     check,
     people,
-    // For a listing asked while the name waits on its person to link it.
     recheck: () => (Date.now() - lastCheck < 2000 ? Promise.resolve() : check()),
     att: () => attest?.att,
     issuers: () => (attest ? [attest.issuer] : []),

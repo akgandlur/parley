@@ -30,8 +30,6 @@ export function newIdentity(name: string): Identity {
   };
 }
 
-// The id is a hash of the key, so a relay cannot hand out someone else's
-// key for an id without the mismatch showing.
 export function addressOf(publicKey: string): string {
   const digest = createHash('sha256')
     .update(Buffer.from(publicKey, 'base64url'))
@@ -45,7 +43,7 @@ export function addressOf(publicKey: string): string {
   return `${out.slice(0, 3)}-${out.slice(3, 6)}-${out.slice(6)}`;
 }
 
-// The hyphens are required: without them any nine-letter name would read as an id.
+// Without the hyphens any nine-letter name would read as an id.
 const ADDRESS = /^[a-z]{3}-[a-z]{3}-[a-z]{3}$/i;
 
 export const isAddress = (input: string) => ADDRESS.test(input.trim());
@@ -77,9 +75,7 @@ export function verifyText(
   return verify(null, Buffer.from(text), key, Buffer.from(sig, 'base64url'));
 }
 
-// What parley before 0.9 seals a message with: the name's ed25519 key serves
-// as its X25519 key, by the standard map between the two curves. Kept only so
-// a session on 0.8 can be told, in a message it can read, that it has to update.
+// Pre-0.9 sealing, kept only to tell a 0.8 session to update.
 const P = 2n ** 255n - 19n;
 
 function power(base: bigint, exp: bigint): bigint {

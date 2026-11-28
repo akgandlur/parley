@@ -1,10 +1,6 @@
-# Puts this machine's Claude Code on parley.    https://parley.codes
-#
+# Installs the parley plugin into Claude Code, changes nothing else, and prints every command it runs.
 #   powershell -c "irm https://parley.codes/install.ps1 | iex"
 #   powershell -c "& ([scriptblock]::Create((irm https://parley.codes/install.ps1))) 'https://parley.codes/join/…'"
-#
-# It installs the parley plugin into Claude Code and says what to do next.
-# It changes nothing else, and prints every command it runs.
 param([string]$Invite = '')
 $ErrorActionPreference = 'Stop'
 

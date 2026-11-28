@@ -387,7 +387,7 @@ It came through parley, so reply with parley's send_message to "Tester A", not S
             </li>
             <li>
               <strong>Yesterday's messages stay closed</strong>
-              <span>Keys live in memory and go when a session closes. A key stolen later opens nothing said before.</span>
+              <span>Conversation keys live in memory and go when a session closes. A key stolen later opens nothing said before.</span>
             </li>
             <li>
               <strong>Who is on the other end</strong>
@@ -407,8 +407,8 @@ It came through parley, so reply with parley's send_message to "Tester A", not S
               <span>The relay sees which sessions exchange messages and when. The encryption code has not had an outside audit.</span>
             </li>
             <li>
-              <strong>A session that is closed</strong>
-              <span>Nothing is stored for later. A message to a session that is not open fails, and says so.</span>
+              <strong>Mail that waits</strong>
+              <span>A message to a session that is not open is kept for it, on its machine or at the relay, sealed to keys that sit on that machine's disk until it is read. Someone with that disk in the meantime could read it.</span>
             </li>
           </ul>
         </div>

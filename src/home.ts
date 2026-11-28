@@ -17,8 +17,6 @@ export type Config = { relay: string };
 
 export type Contact = { name: string; firstSeen: string; key?: string };
 
-// One of the names this machine holds. `home` is its folder: a folder under
-// ROOT/ids, or ROOT itself for an identity made before sessions had names.
 export type Local = { home: string; name: string; address: string };
 
 export type Claim = { pid: number; session?: string; dir: string };
@@ -39,8 +37,7 @@ export function writeJson(
 ) {
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const path = join(home, name);
-  // Several processes read contacts.json and claims.json while one writes.
-  // The rename keeps a reader from ever seeing half a file.
+  // The rename keeps a concurrent reader from seeing half a file.
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
   if (secret) chmodSync(tmp, 0o600);
@@ -52,8 +49,6 @@ export const loadIdentity = (home: string) =>
 
 export const loadConfig = (home: string) => readJson<Config>(home, 'config.json');
 
-// The machine has a key of its own. Its person links it to their parley
-// account once, and it then vouches for every name made here.
 export function machineIdentity(): Identity {
   if (!existsSync(join(ROOT, 'machine.json'))) {
     writeJson(ROOT, 'machine.json', newIdentity(hostname().replace(/\.local$/, '').slice(0, 60) || 'this machine'), true);
@@ -64,6 +59,7 @@ export function machineIdentity(): Identity {
 export function locals(): Local[] {
   const ids = join(ROOT, 'ids');
   const under = existsSync(ids) ? readdirSync(ids).map((d) => join(ids, d)) : [];
+  // ROOT itself holds an identity made before sessions had names.
   return [ROOT, ...under]
     .filter((home) => existsSync(join(home, 'identity.json')))
     .map((home) => {
@@ -75,8 +71,6 @@ export function locals(): Local[] {
 export const sameName = (a: string, b: string) =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
-// Ids had another shape before 0.7. A contact filed under one is refiled
-// under the id its key has now; one saved without a key cannot be reached.
 export function loadContacts(): Record<string, Contact> {
   if (!existsSync(join(ROOT, 'contacts.json'))) return {};
   const saved = readJson<Record<string, Contact>>(ROOT, 'contacts.json');
@@ -87,9 +81,6 @@ export function loadContacts(): Record<string, Contact> {
   );
 }
 
-// Ids whose messages their person has said to act on like their own
-// requests, or 'all'. Only the person changes it: `parley trust`, which the
-// /parley:trust command runs with no model in between.
 export function loadTrusted(): string[] {
   return existsSync(join(ROOT, 'trusted.json')) ? readJson<{ ids: string[] }>(ROOT, 'trusted.json').ids : [];
 }
@@ -110,9 +101,7 @@ export function saveContact(address: string, name: string, key: string) {
   writeJson(ROOT, 'contacts.json', contacts);
 }
 
-// An id is 42 bits of its key, few enough that a second key with the same
-// id can be searched for. So a contact is the key first heard from, and the
-// id alone never stands in for it again.
+// An id is 42 bits of its key: a contact is the key first heard from, never the id alone.
 export function isSavedKey(address: string, key: string): boolean {
   const saved = loadContacts()[address]?.key;
   return saved === undefined || saved === key;
@@ -120,7 +109,6 @@ export function isSavedKey(address: string, key: string): boolean {
 
 type Named = { name: string; address: string };
 
-// `also` is what the account's other sessions are called, which no file here holds.
 export function callable(self: string, also: Named[] = []): Named[] {
   const here = locals().map(({ name, address }) => ({ name, address }));
   const known = Object.entries(loadContacts()).map(([address, c]) => ({ name: c.name, address }));
@@ -129,8 +117,7 @@ export function callable(self: string, also: Named[] = []): Named[] {
   return all;
 }
 
-// Anything shaped like an id is one, whatever a contact has named itself:
-// a name must never be able to stand in for someone else's id.
+// A name must never stand in for someone else's id.
 export function addressFor(to: string, self: string, also: Named[] = []): string {
   if (isAddress(to)) return normalizeAddress(to);
   const names = callable(self, also);
@@ -166,8 +153,6 @@ function loadClaims(): Record<string, Claim> {
   return readJson<Record<string, Claim>>(ROOT, 'claims.json');
 }
 
-// The name this Claude Code session holds. The claim is filed under the
-// session id, so it survives the MCP server restarting inside one session.
 export function mine(): Local | undefined {
   const claims = loadClaims();
   return locals().find((l) => {
@@ -176,8 +161,6 @@ export function mine(): Local | undefined {
   });
 }
 
-// The session that holds a name right now. A claim whose process has gone
-// stays on file so that session can resume into its name, but holds nothing.
 export function holder(address: string): Claim | undefined {
   const claim = loadClaims()[address];
   return claim && alive(claim.pid) ? claim : undefined;

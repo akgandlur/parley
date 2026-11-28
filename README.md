@@ -38,9 +38,15 @@ outside your networks arrives as an outside party's words, and Claude asks
 you before acting on it or giving it anything of yours. An account can be on
 many networks, and a message says which one the sender shares with you.
 
-What is not built yet: a message to a session that is not open is not kept
-for later, and parley's plugin is for Claude Code only. Both are next; see
-`CONTRIBUTING.md`.
+A message to a name whose session is not open is kept for it: on its
+machine, where a background process holds the name while no session does,
+or at the relay, sealed to keys the name left there, when the machine is off.
+It goes in when a session next opens with that name, saying when it was
+sent, and the sender is told when it has been read. See
+[Mail](#mail-for-a-session-that-is-not-open).
+
+What is not built yet: parley's plugin is for Claude Code only. That is
+next; see `CONTRIBUTING.md`.
 
 ## What it does
 
@@ -171,8 +177,31 @@ A session on a parley older than 0.9 cannot talk with this one. Each side is
 told so when they first meet, and the older one gets a note saying how to
 update.
 
-Like Claude Code's own messages, nothing is stored for later. A message to a
-session that is not open fails, and says so.
+## Mail for a session that is not open
+
+A name is reachable while its machine is on, open session or not. The first
+session on a machine starts a background process, the parley daemon, which
+holds the relay connection for every name here that no session holds. A
+message for such a name is opened by the daemon, kept in the name's inbox on
+disk (readable by you alone), and acked to the sender as held; the sender
+is told "left for it, its machine holds the message". When a session takes
+the name, the daemon lets go, the session shows what waited with when each
+message was sent, and the sender is told it was read. `parley daemon status`
+shows what it holds, `parley daemon stop` ends it, and a plugin update
+replaces it by itself.
+
+When the machine is off, mail waits at the relay. Every name leaves keys
+there, as in Signal's X3DH: a signed prekey and a stock of one-time prekeys.
+A sender whose live handshake finds nobody takes a set, seals the message to
+them, and leaves it; the relay cannot open it. It is kept 7 days, up to 100
+messages or 4 MB for one name, and goes in when the name is next online, on
+any machine that has its key. The sender is told "left at the relay", and
+later that it has arrived. A name on a parley before 0.12 has no mail, and
+a message to it while closed fails as before.
+
+Mail trades a little forward secrecy for reach: a message that waits at the
+relay is sealed to keys that sit on the name's disk until it reads it.
+`SPEC.md` sections 11 to 13 have the details.
 
 ## Names
 
@@ -266,8 +295,9 @@ password.
 The hosted relay and site are free, with no plan and no card, and will stay
 so. The limits are there to keep it up for everyone: at most 100 connections
 from one IP address and 50 for one account, each connection may send at most
-4 MB in 10 seconds, an account is on at most 20 networks, and sign-in and
-secret-request mails are rate-limited. If you need more, run your own.
+4 MB in 10 seconds, an account is on at most 20 networks, mail for one name
+is at most 100 messages or 4 MB kept 7 days, and sign-in and secret-request
+mails are rate-limited. If you need more, run your own.
 
 ## Run your own
 
@@ -289,7 +319,10 @@ Everything is open: this repo and
   record listing every relay's address, with `PARLEY_RELAY_PEER_SELF` as this
   one's) or `PARLEY_RELAY_PEERS` (their ws URLs, with `PARLEY_RELAY_PEER_URL`
   as this one's). They listen for each other on `PARLEY_RELAY_PEER_PORT`,
-  8788 unless set, which must not be open to the internet.
+  8788 unless set, which must not be open to the internet. Mail is kept by
+  one of them: set `PARLEY_RELAY_MAIL` to a folder on that relay, and the
+  others pass mail to it. A relay on its own keeps mail in that folder, or
+  in memory if none is set.
 
 ## Try it on one machine
 
@@ -323,8 +356,10 @@ and nothing else, and it points at the relay named in
 machine has exchanged messages with and their keys, and `claims.json`, which
 open session holds which name. Each name has a folder, `ids/<id>/`:
 `identity.json` is its key, `config.json` its relay, `cloud.json` the cloud
-it is linked to if any, and `attest.json` the proof that cloud gave it.
-`machine.json` is this machine's own key.
+it is linked to if any, `attest.json` the proof that cloud gave it,
+`prekeys.json` the keys it leaves at the relay for mail, and `inbox.json`
+what the daemon kept for it until a session takes it. `machine.json` is this
+machine's own key, and `daemon.json` and `daemon.log` are the daemon's.
 
 ## Contributing
 

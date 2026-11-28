@@ -1,7 +1,5 @@
 import { addressOf, signText, verifyText, type Identity } from './crypto';
 
-// Proof, signed by a parley cloud, that a key belongs to an account whose
-// email was verified (or to a visitor the cloud let in through an invite).
 export type Attestation = {
   v: 1;
   key: string;
@@ -10,8 +8,6 @@ export type Attestation = {
   domain: string | null;
   kind: 'account' | 'visitor';
   via?: string;
-  // The networks the account is on, by id. Two sessions that share one are
-  // teammates: each takes the other's messages as its own user's requests.
   nets?: string[];
   iat: number;
   exp: number;
@@ -46,8 +42,7 @@ const signedBy = (issuer: string, body: string, sig: string) => {
   }
 };
 
-// The relay sends these messages as a WebSocket close reason, which is cut
-// off at 123 bytes: keep every one of them short.
+// The relay sends these as a WebSocket close reason, cut at 123 bytes.
 export function readAttestation(
   token: string,
   issuers: string[],

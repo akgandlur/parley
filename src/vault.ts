@@ -4,10 +4,6 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from '
 import { basename, join } from 'node:path';
 import { ROOT, readJson, writeJson } from './home';
 
-// A secret is used by its label. Its value is handed to the one program or
-// the one host its rules name, and to nothing a model reads: every result
-// that leaves this file has the value masked.
-
 export type Rule = { run: string; args: string[]; once?: boolean } | { http: string; once?: boolean };
 type Entry = { iv: string; ct: string; tag: string; from: string; at: string; sendTo: string[]; use: Rule[] };
 export type Listed = { label: string; from: string; at: string; sendTo: string[]; use: Rule[] };
@@ -38,9 +34,7 @@ export const ruleText = (r: Rule) =>
 const all = (): Record<string, Entry> => (existsSync(join(DIR, 'secrets.json')) ? readJson<Record<string, Entry>>(DIR, 'secrets.json') : {});
 const save = (entries: Record<string, Entry>) => writeJson(DIR, 'secrets.json', entries, true);
 
-// The key sits beside what it locks, so this keeps a value out of a search,
-// a backup of one file or a glance. It does not stop a program that runs as
-// the same user.
+// The key sits beside what it locks: this stops a glance, not a program running as the same user.
 function key(): Buffer {
   if (!existsSync(join(DIR, 'key.json'))) writeJson(DIR, 'key.json', { key: randomBytes(32).toString('base64') }, true);
   return Buffer.from(readJson<{ key: string }>(DIR, 'key.json').key, 'base64');
@@ -122,8 +116,6 @@ export function removeSecret(label: string) {
   note('removed', label, '');
 }
 
-// For sending to another session: the value leaves in the sealed message and
-// is returned to no tool.
 export function takeForSending(label: string, to: string, trusted: boolean, met: boolean): { value: string; use: Rule[] } {
   const e = entryOf(label);
   if (!trusted && !e.sendTo.includes(to)) {
@@ -212,11 +204,11 @@ export async function fetchWith(
     s.replace(/\{\{secret\}\}/g, value).replace(/\{\{basic:([^}]*)\}\}/g, (_, user: string) => Buffer.from(`${user}:${value}`).toString('base64'));
   spend(label, rule);
   note('used', label, `${by}: ${shown}`);
-  // A redirect is not followed: it could carry the secret to a host no rule names.
   const res = await fetch(url, {
     method: req.method ?? 'GET',
     headers: Object.fromEntries(Object.entries(req.headers ?? {}).map(([k, v]) => [k, fill(v)])),
     body: req.body === undefined ? undefined : fill(req.body),
+    // A redirect could carry the secret to a host no rule names.
     redirect: 'manual',
     signal: AbortSignal.timeout(60_000),
   });

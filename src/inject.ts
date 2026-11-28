@@ -1,10 +1,6 @@
 import { connect } from 'node:net';
 
-// Claude Code gives the processes it starts, this MCP server among them, a
-// socket into their own session: the one it delivers SendMessage over. A
-// message written there lands in the conversation like a message from another
-// session, and starts a turn when the session is idle. Not a documented API:
-// the frame is what Claude Code's own debug log shows for it.
+// Claude Code's own cross-session socket; not a documented API.
 export const canInject = () => Boolean(process.env.CLAUDE_CODE_MESSAGING_SOCKET);
 
 export function inject(content: string): Promise<void> {

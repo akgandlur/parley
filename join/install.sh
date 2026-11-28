@@ -1,11 +1,6 @@
 #!/bin/sh
-# Puts this machine's Claude Code on parley.    https://parley.codes
-#
-#   curl -fsSL https://parley.codes/install.sh | sh
-#   curl -fsSL https://parley.codes/install.sh | sh -s -- 'https://parley.codes/join/…'
-#
-# It installs the parley plugin into Claude Code and says what to do next.
-# It changes nothing else, and prints every command it runs.
+# Installs the parley plugin into Claude Code, changes nothing else, and prints every command it runs.
+#   curl -fsSL https://parley.codes/install.sh | sh [-s -- 'https://parley.codes/join/…']
 set -eu
 
 say() { printf '%s\n' "$*"; }

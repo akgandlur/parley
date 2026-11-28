@@ -1,6 +1,3 @@
-// Drives real parley MCP servers through a real relay on this machine. Each
-// stands in a Claude Code session whose socket the script plays; nothing
-// here calls a model.
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
@@ -10,14 +7,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ServerWebSocket } from 'bun';
 import { addressOf, newIdentity, signText, verifyText, type Identity } from '../src/crypto';
-import { answer, canSeal, checkOffer, finish, offer, open, safetyNumber, seal } from '../src/ratchet';
+import { answer, answerMail, canSeal, checkMailOffer, checkOffer, finish, loadPair, newPair, offer, offerMail, open, safetyNumber, savePair, seal, signPrekey } from '../src/ratchet';
+import { MAIL_FRAMES_MAX } from '../src/mail';
 import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Contact } from '../src/home';
 import { MAX_PER_IP, RELAY_AUTH, startRelay } from '../src/relay';
 import { VERSION } from '../src/types';
 
-// PARLEY_E2E_CLI="node /abs/bin/parley.mjs" runs the same checks against
-// the bundle the plugin ships.
+// PARLEY_E2E_CLI="node /abs/bin/parley.mjs" runs the same checks against the bundle.
 const CLI = join(import.meta.dir, '..', 'src', 'cli.ts');
 const RUN = (process.env.PARLEY_E2E_CLI ?? `bun ${CLI}`).split(' ');
 const base = process.env.PARLEY_E2E_DIR ?? mkdtempSync(join(tmpdir(), 'parley-'));
@@ -31,17 +28,16 @@ function check(name: string, ok: unknown, detail?: unknown) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || detail === undefined ? '' : `  -> ${JSON.stringify(detail)}`}`);
 }
 
-// The run may itself be inside a Claude Code session. The sessions here are
-// not that one, and must never write into its socket.
 const {
+  // The run may be inside a Claude Code session: never write into its socket, never see its sessions.
   CLAUDE_CODE_SESSION_ID: _id,
   CLAUDE_CODE_MESSAGING_SOCKET: _sock,
   CLAUDE_CODE_MESSAGING_TOKEN: _token,
   ...REAL
 } = process.env;
-// Nor may they see the real sessions open on this machine.
 const CLAUDE_DIR = join(base, 'claude');
-const ENV = { ...REAL, CLAUDE_CONFIG_DIR: CLAUDE_DIR, PARLEY_HOLD_SECONDS: '0' };
+// The daemon check starts one on purpose.
+const ENV = { ...REAL, CLAUDE_CONFIG_DIR: CLAUDE_DIR, PARLEY_HOLD_SECONDS: '0', PARLEY_DAEMON: 'off' };
 
 async function until<T>(get: () => T | undefined, ms = 8000): Promise<T | undefined> {
   for (const deadline = Date.now() + ms; Date.now() < deadline; await Bun.sleep(50)) {
@@ -60,8 +56,6 @@ async function eventually<T>(get: () => Promise<T | undefined>, ms = 8000): Prom
   }
 }
 
-// What Claude Code's side of its messaging socket sees: an optional auth
-// line, then frames, one connection per message.
 type Arrival = { auth?: string; frame: any };
 
 function fakeSession() {
@@ -92,8 +86,6 @@ function fakeSession() {
 
 type Reply = { isError?: boolean; content: { text: string }[] };
 
-// One Claude Code session's MCP server. `session` stands in for the id
-// Claude Code gives each session.
 async function agent(root: string, session: string, env: Record<string, string> = {}, run = RUN) {
   const transport = new StdioClientTransport({
     command: run[0] ?? 'bun',
@@ -178,7 +170,6 @@ function sealing() {
   const swapped = answer(cat, annAddr, o.hello).reply;
   check('an answer with a swapped one-time key is refused', fails(() => finish(o.hello, o.pair, annAddr, { ...reply, e: swapped.e })));
 
-  // What forward secrecy means: the long-term keys alone open nothing.
   const late = start();
   const kept = seal(late.a, 'said earlier');
   open(late.b, kept);
@@ -187,6 +178,22 @@ function sealing() {
 
   const number = safetyNumber(ann.publicKey, ben.publicKey);
   check('the safety number is the same from both sides, and changes with either key', /^(\d{5} ){5}\d{5}$/.test(number) && number === safetyNumber(ben.publicKey, ann.publicKey) && number !== safetyNumber(ann.publicKey, cat.publicKey));
+
+  console.log('\n# a conversation can begin from keys left at the relay');
+  const spk = newPair();
+  const opk = newPair();
+  const bundle = { key: ben.publicKey, spk: { pub: spk.publicKey, sig: signPrekey(ben, spk.publicKey) }, opk: opk.publicKey };
+  const mailed = offerMail(ann, benAddr, bundle);
+  const first = seal(mailed.ratchet, 'sealed while you were away');
+  check('the offerer can send at once', canSeal(mailed.ratchet) && checkMailOffer(mailed.hello, benAddr));
+  const benMail = answerMail(ben, mailed.hello, spk, opk);
+  check('the other side opens it with the keys it left, and can then answer', open(benMail, first) === 'sealed while you were away' && canSeal(benMail) && open(mailed.ratchet, seal(benMail, 'back')) === 'back');
+  check('the offer is only good for the id it names', !checkMailOffer(mailed.hello, addressOf(cat.publicKey)));
+  check('a bundle whose signed prekey is signed by another key is refused', fails(() => offerMail(ann, benAddr, { ...bundle, spk: { ...bundle.spk, sig: signPrekey(cat, spk.publicKey) } })));
+  check('without the one-time key it does not open', fails(() => open(answerMail(ben, { ...mailed.hello, opk: undefined }, spk, undefined), first)) && fails(() => answerMail(ben, mailed.hello, spk, undefined)));
+  const noOpk = offerMail(ann, benAddr, { key: bundle.key, spk: bundle.spk });
+  check('and a bundle with no one-time key still works', open(answerMail(ben, noOpk.hello, spk, undefined), seal(noOpk.ratchet, 'stock ran out')) === 'stock ran out');
+  check('a prekey pair survives being saved', loadPair(savePair(spk)).publicKey === spk.publicKey && open(answerMail(ben, noOpk.hello, loadPair(savePair(spk)), undefined), seal(noOpk.ratchet, 'again')) === 'again');
 }
 
 const A_ROOT = join(base, 'machine-a');
@@ -261,19 +268,25 @@ async function messaging() {
 
   console.log('\n# when the other side is not there');
   const nobody = await ann.tool('send_message', { to: 'zzz-zzz-zzz', message: 'anyone?' });
-  check('an id with no open session says so', nobody.failed && nobody.text.includes('is not online'), nobody);
+  check('an id that was never here says so', nobody.failed && nobody.text.includes('is not online') && nobody.text.includes('no mail'), nobody);
   const benPid = ben.pid;
   await ben.close();
   check('closing the session ends its parley server', await until(() => !alive(benPid) || undefined, 5000), benPid);
   const gone = await ann.tool('send_message', { to: 'Ben', message: 'still there?' });
-  check('a message to a closed session says it is not online', gone.failed && gone.text.includes('is not online'), gone);
+  check('a message to a closed session is left for it at the relay', !gone.failed && gone.text.startsWith(`Left for "Ben" (${benAddr}) at the relay`) && gone.text.includes('7 days'), gone);
+  check('and nothing of it is on disk in the clear', !readFileSync(join(B_ROOT, 'ids', benAddr, 'prekeys.json'), 'utf8').includes('still there'));
   const again = await agent(B_ROOT, 'session-ben', benSock.env);
-  const before = benSock.arrivals.length;
+  const late = await until(() => benSock.texts().find((t) => t.includes('still there?')));
+  check('it goes in when the session is back, saying when it was sent', late?.includes(`parley message from "Ann" (${annAddr}, not verified), sent 20`) && late.includes('kept until now'), late);
+  const toldAnn = await until(() => annSock.texts().find((t) => t.includes('now has the message you left')));
+  check('and Ann is told it arrived', toldAnn?.includes(`"Ben" (${benAddr}) now has the message you left`), annSock.texts());
   const resumed = await eventually(async () => {
     const r = await ann.tool('send_message', { to: 'Ben', message: 'welcome back' });
     return r.failed ? undefined : r;
   });
-  check('the same session comes back as its name with no setup, and is reachable', resumed?.text.includes('Delivered') && benSock.arrivals.length === before + 1, resumed);
+  check('the same session comes back as its name with no setup, and is reachable', resumed?.text.includes('Delivered') && benSock.texts().some((t) => t.includes('welcome back')), resumed);
+  const replied = await again.tool('send_message', { to: 'Ann', message: 'back now' });
+  check('and the conversation that began in mail goes on', !replied.failed && replied.text.startsWith('Delivered') && annSock.texts().some((t) => t.includes('back now')), replied);
   const listedBack = await again.tool('list_agents');
   check('and is that name', listedBack.text.includes(`"Ben" (${benAddr})`), listedBack);
 
@@ -291,7 +304,6 @@ async function messaging() {
 
 type Pair = Awaited<ReturnType<typeof messaging>>;
 
-// A raw relay client stands in for a relay or a peer that misbehaves.
 async function forgery(p: Pair) {
   console.log('\n# what a relay or a stranger cannot do');
   const eve = newIdentity('Eve');
@@ -423,7 +435,6 @@ async function olderNode() {
   await dee.close();
 }
 
-// The real 0.8 plugin, as it was published, against this version.
 async function olderVersion() {
   console.log('\n# a session on parley 0.8 meets this one');
   const old = join(base, 'parley-0.8.mjs');
@@ -537,7 +548,7 @@ async function oneLine() {
   check('its own id is refused', (await a.tool('to', { text: `${aAddr} hi` })).failed);
   await b.close();
   const gone = await a.tool('to', { text: `${bAddr} still there?` });
-  check('a session that is not open is said to be', gone.failed && gone.text.includes('is not online'), gone);
+  check('a session that is not open gets the message left for it', !gone.failed && gone.text.startsWith(`Left for "Line B" (${bAddr}) at the relay`), gone);
   await a.close();
 }
 
@@ -545,8 +556,6 @@ const cloudIssuer = newIdentity('Test cloud');
 const unix = () => Math.floor(Date.now() / 1000);
 type Account = { sub: string; domain: string | null; banned?: boolean; lifetime?: number; nets?: string[]; name?: string };
 
-// A stand-in for the cloud: it checks what a real one must check and gives
-// the accounts it is told about their proofs.
 function startCloudStub() {
   const accounts = new Map<string, Account>();
   const machines = new Map<string, Account>();
@@ -555,7 +564,6 @@ function startCloudStub() {
     hostname: '127.0.0.1',
     async fetch(req) {
       const path = new URL(req.url).pathname;
-      // Like a cloud from before short links, so the long one is what is given.
       if (path !== '/api/attest' && path !== '/api/people') return Response.json({ error: 'nothing here' }, { status: 404 });
       const purpose = path.slice('/api/'.length);
       const text = await req.text();
@@ -568,7 +576,6 @@ function startCloudStub() {
       if (!account) return Response.json({ error: 'not linked' }, { status: 403 });
       if (account.banned) return Response.json({ error: 'banned' }, { status: 403 });
       if (purpose === 'people') {
-        // The networks this account is on, with everyone else on each.
         const nets = (account.nets ?? []).map((id) => ({
           id,
           name: `Net ${id}`,
@@ -686,8 +693,6 @@ function dialRelay(url: string, id: Identity, att?: string, forwardedFor?: strin
   });
 }
 
-// Two accounts on one network: each takes the other's messages as its own
-// user's requests, and sees the other's sessions by name.
 async function networks() {
   console.log('\n# two accounts on one network');
   const stub = startCloudStub();
@@ -867,6 +872,126 @@ async function conversations() {
   check('and so does one from the side that restarted', !fromNew.failed && !onward.failed && faySock.texts().some((t) => t.includes('from the restarted side')) && gusSock.texts().some((t) => t.includes('and onward')), [fromNew, onward]);
 }
 
+function listen(link: Link): any[] {
+  const frames: any[] = [];
+  link.ws.onmessage = (ev) => frames.push(JSON.parse(String(ev.data)));
+  return frames;
+}
+
+async function mailAtRelay() {
+  console.log('\n# mail at the relay');
+  const owl = newIdentity('Owl');
+  const owlAddr = addressOf(owl.publicKey);
+  const sam = newIdentity('Sam');
+  let owlLink = await dialRelay(relayUrl, owl);
+  let owlFrames = listen(owlLink);
+  const spk = newPair();
+  const opks = [newPair(), newPair(), newPair()];
+  owlLink.ws.send(JSON.stringify({ t: 'prekeys', spk: { pub: spk.publicKey, sig: signPrekey(sam, spk.publicKey) }, opks: opks.map((o) => o.publicKey) }));
+  const refused = await until(() => owlFrames.find((f) => f.t === 'prekeys' && f.error));
+  check('a signed prekey not signed by the name is refused', refused?.error.includes('not signed by this name'), refused);
+  const samLink = await dialRelay(relayUrl, sam);
+  const samFrames = listen(samLink);
+  samLink.ws.send(JSON.stringify({ t: 'send', to: addressOf(newIdentity('Nobody').publicKey), ref: 'm1', payload: { n: 1 }, hold: true }));
+  const noBox = await until(() => samFrames.find((f) => f.t === 'undeliverable' && f.ref === 'm1'));
+  check('a frame for a name that left no keys cannot be held', noBox?.why === 'no mailbox', noBox);
+  owlLink.ws.send(JSON.stringify({ t: 'prekeys', spk: { pub: spk.publicKey, sig: signPrekey(owl, spk.publicKey) }, opks: opks.map((o) => o.publicKey) }));
+  const left = await until(() => owlFrames.find((f) => f.t === 'prekeys' && f.left !== undefined));
+  check('leaving keys says how many one-time keys the relay holds', left?.left === 3, left);
+  samLink.ws.send(JSON.stringify({ t: 'prekeys', id: owlAddr }));
+  const bundle = await until(() => samFrames.find((f) => f.t === 'prekeys' && f.id === owlAddr));
+  check('a sender gets the signed prekey and one one-time key', bundle?.key === owl.publicKey && bundle.spk?.pub === spk.publicKey && bundle.spk.sig === signPrekey(owl, spk.publicKey) && opks.some((o) => o.publicKey === bundle.opk), bundle);
+  const fewer = await until(() => owlFrames.find((f) => f.t === 'prekeys' && f.left === 2));
+  check('and the owner is told its stock is low', fewer, owlFrames);
+  samLink.ws.send(JSON.stringify({ t: 'prekeys', id: 'zzz-zzz-zzz' }));
+  const none = await until(() => samFrames.find((f) => f.t === 'prekeys' && f.id === 'zzz-zzz-zzz'));
+  check('a name that left no keys gives none', none && none.key === undefined, none);
+  samLink.ws.send(JSON.stringify({ t: 'send', to: owlAddr, ref: 'live', payload: { n: 0 }, hold: true }));
+  const live = await until(() => owlFrames.find((f) => f.t === 'recv' && f.payload?.n === 0));
+  check('a frame for a name that is online is delivered, hold or not', live && live.held === undefined, live);
+
+  owlLink.ws.close();
+  await Bun.sleep(200);
+  samLink.ws.send(JSON.stringify({ t: 'send', to: owlAddr, ref: 'plain', payload: { n: -1 } }));
+  const plain = await until(() => samFrames.find((f) => f.t === 'undeliverable' && f.ref === 'plain'));
+  check('a frame sent without hold is not kept', plain && plain.why === undefined, plain);
+  for (let n = 1; n <= MAIL_FRAMES_MAX; n++) samLink.ws.send(JSON.stringify({ t: 'send', to: owlAddr, ref: `m${n}`, payload: { n }, hold: true }));
+  const heldAll = await until(() => samFrames.filter((f) => f.t === 'held').length === MAIL_FRAMES_MAX || undefined);
+  check(`a frame sent with hold is kept, up to ${MAIL_FRAMES_MAX}`, heldAll && samFrames.find((f) => f.t === 'held')?.ref === 'm1', samFrames.filter((f) => f.t === 'held').length);
+  samLink.ws.send(JSON.stringify({ t: 'send', to: owlAddr, ref: 'one-more', payload: { n: 101 }, hold: true }));
+  const full = await until(() => samFrames.find((f) => f.t === 'undeliverable' && f.ref === 'one-more'));
+  check('and the one after is refused as full', full?.why === 'full', full);
+  const reach = await fetch(`http://127.0.0.1:${relay.port}/online`, { method: 'POST', body: JSON.stringify({ ids: [owlAddr, addressOf(sam.publicKey), 'zzz-zzz-zzz'] }) }).then((r) => r.json() as Promise<any>);
+  check('/online says who has mail', reach.reachable.length === 1 && reach.reachable[0] === owlAddr && reach.online.length === 1, reach);
+
+  owlLink = await dialRelay(relayUrl, owl);
+  owlFrames = listen(owlLink);
+  const all = await until(() => (owlFrames.filter((f) => f.t === 'recv' && f.held).length === MAIL_FRAMES_MAX ? owlFrames.filter((f) => f.t === 'recv' && f.held) : undefined));
+  check('what was held comes when the owner is back, oldest first, with when it arrived', all && all[0]?.payload.n === 1 && all[0].held.seq === 1 && all[MAIL_FRAMES_MAX - 1]?.held.seq === MAIL_FRAMES_MAX && all[0].from === addressOf(sam.publicKey) && /^20/.test(all[0].held.at), all?.slice(0, 2));
+  check('after the stock count', owlFrames[0]?.t === 'prekeys' && owlFrames[0].left === 2, owlFrames[0]);
+  owlLink.ws.send(JSON.stringify({ t: 'took', seq: 2 }));
+  await Bun.sleep(100);
+  owlLink.ws.close();
+  await Bun.sleep(200);
+  owlLink = await dialRelay(relayUrl, owl);
+  owlFrames = listen(owlLink);
+  const rest = await until(() => (owlFrames.filter((f) => f.t === 'recv' && f.held).length === MAIL_FRAMES_MAX - 2 ? owlFrames.filter((f) => f.t === 'recv' && f.held) : undefined));
+  check('what was not taken comes again', rest && rest[0]?.held.seq === 3, rest?.[0]);
+  owlLink.ws.send(JSON.stringify({ t: 'took', seq: MAIL_FRAMES_MAX }));
+  await Bun.sleep(100);
+  owlLink.ws.close();
+  await Bun.sleep(200);
+  owlLink = await dialRelay(relayUrl, owl);
+  owlFrames = listen(owlLink);
+  await Bun.sleep(300);
+  check('and what was taken does not', !owlFrames.some((f) => f.t === 'recv'), owlFrames);
+  owlLink.ws.close();
+
+  for (let i = 0; i < 5; i++) samLink.ws.send(JSON.stringify({ t: 'prekeys', id: owlAddr }));
+  const limited = await until(() => samFrames.find((f) => f.t === 'prekeys' && f.id === owlAddr && f.error));
+  check('a sender cannot take the keys of one name over and over', limited?.error.includes('too many'), limited);
+  samLink.ws.close();
+}
+
+async function daemon(p: Pair) {
+  console.log('\n# the machine\'s daemon');
+  const root = join(base, 'machine-dan');
+  const danSock = fakeSession();
+  const on = { ...danSock.env, PARLEY_DAEMON: 'on' };
+  const dan = await agent(root, 'session-dan', on);
+  const danAddr = addressIn((await dan.tool('setup', { name: 'Dan' })).text);
+  const info = await until(() => (existsSync(join(root, 'daemon.json')) ? readJson<{ pid: number; version: string }>(root, 'daemon.json') : undefined), 10_000);
+  cleanup.push(() => cli(root, 'daemon', 'stop'));
+  check('a session that takes a name starts the daemon', info && alive(info.pid) && info.version === VERSION, info);
+  const idle = await eventually(async () => (cli(root, 'daemon', 'status').includes('nothing') ? true : undefined), 10_000);
+  check('which holds nothing while the session holds the name', idle, cli(root, 'daemon', 'status'));
+  await dan.close();
+  const took = await eventually(async () => (cli(root, 'daemon', 'status').includes(`"Dan" (${danAddr}): connected`) ? true : undefined), 15_000);
+  check('and holds it once the session is gone', took, cli(root, 'daemon', 'status'));
+  const sent = await eventually(async () => {
+    const r = await p.ann.tool('send_message', { to: danAddr, message: 'for when you are back' });
+    return r.failed ? undefined : r;
+  });
+  check('a message to the name is left with its machine', sent?.text.startsWith(`Left for "Dan" (${danAddr}): no session with that name is open`) && sent.text.includes('its machine holds the message'), sent);
+  const inbox = join(root, 'ids', danAddr, 'inbox.json');
+  check('and waits in its inbox, for its owner only', existsSync(inbox) && (statSync(inbox).mode & 0o777) === 0o600 && readFileSync(inbox, 'utf8').includes('for when you are back'));
+  check('the daemon logs no message text', !readFileSync(join(root, 'daemon.log'), 'utf8').includes('for when you are back'));
+  const back = await agent(root, 'session-dan', on);
+  const got = await until(() => danSock.texts().find((t) => t.includes('for when you are back')));
+  check('it goes in when a session takes the name again, saying when it was sent', got?.includes(`from "Ann" (${p.annAddr}, not verified), sent 20`) && got.includes('kept until now'), got);
+  const read = await until(() => p.annSock.texts().find((t) => t.includes('has read the message you left')));
+  check('and the sender is told it was read', read?.includes(`"Dan" (${danAddr}) has read the message you left for it`), p.annSock.texts());
+  check('the inbox is empty again', !existsSync(inbox));
+  const freed = await eventually(async () => (cli(root, 'daemon', 'status').includes('nothing') ? true : undefined), 10_000);
+  check('and the daemon has let go of the name', freed, cli(root, 'daemon', 'status'));
+  const live = await p.ann.tool('send_message', { to: danAddr, message: 'and now live' });
+  check('a message to the open session is delivered as before', !live.failed && live.text === `Delivered to "Dan" (${danAddr}).` && danSock.texts().some((t) => t.includes('and now live')), live);
+  await back.close();
+  cli(root, 'daemon', 'stop');
+  const stopped = await until(() => !existsSync(join(root, 'daemon.json')) || undefined, 5000);
+  check('`parley daemon stop` ends it', stopped && cli(root, 'daemon', 'status').includes('No parley daemon'), stopped);
+}
+
 async function twoRelays() {
   console.log('\n-- two relays behind one address');
   const free = () => {
@@ -877,10 +1002,10 @@ async function twoRelays() {
   };
   const [p1, p2] = [free(), free()];
   const urls = [`ws://127.0.0.1:${p1}`, `ws://127.0.0.1:${p2}`];
-  // Each relay also finds itself under another spelling of its own address.
   const peers = (i: number) => ({ port: [p1, p2][i]!, hostname: '127.0.0.1', secret: 'between-relays', self: urls[i]!, discover: async () => [...urls, `${urls[i]}/`] });
   const talksFile = join(base, 'talks.json');
-  const east = startRelay(0, '127.0.0.1', { peers: peers(0), talksFile });
+  const mailDir = join(base, 'mail');
+  const east = startRelay(0, '127.0.0.1', { peers: peers(0), talksFile, mailDir });
   const west = startRelay(0, '127.0.0.1', { peers: peers(1) });
   cleanup.push(() => east.stop(true), () => west.stop(true));
   const at = (r: { port?: number }) => ({ PARLEY_RELAY: `ws://127.0.0.1:${r.port}` });
@@ -931,15 +1056,22 @@ async function twoRelays() {
   const moved = await agent(eveRoot, 'session-eve', { ...eveSock.env, ...at(west) });
   const again = await eventually(async () => {
     const r = await wal.tool('send_message', { to: 'Eve', message: 'you moved' });
-    return r.failed ? undefined : r;
+    return !r.failed && r.text.startsWith('Delivered') ? r : undefined;
   });
   check('a name that reconnects to the other relay is found there', again && eveSock.texts().some((t) => t.includes('you moved')), again);
   await moved.close();
   const gone = await eventually(async () => {
     const r = await wal.tool('send_message', { to: eveAddr, message: 'still there?' });
-    return r.failed && r.text.includes('is not online') ? r : undefined;
+    return !r.failed && r.text.startsWith('Left for') ? r : undefined;
   });
-  check('and is not online once it closes', gone, gone);
+  check('once it closes, a message from the other relay is left in its mail at the keeper', gone?.text.includes('at the relay'), gone);
+  const file = await until(() => (existsSync(join(mailDir, `${eveAddr}.json`)) ? readFileSync(join(mailDir, `${eveAddr}.json`), 'utf8') : undefined), 3000);
+  check('which keeps it on disk, sealed, for its own user only', file && !file.includes('still there') && (statSync(join(mailDir, `${eveAddr}.json`)).mode & 0o777) === 0o600, file?.slice(0, 80));
+  const returned = await agent(eveRoot, 'session-eve', { ...eveSock.env, ...at(west) });
+  const waited = await until(() => eveSock.texts().find((t) => t.includes("still there?")), 10_000);
+  check("and it reaches the name when it is back on the other relay", waited?.includes('kept until now'), eveSock.texts());
+  check('with the sender told', await until(() => walSock.texts().find((t) => t.includes('now has the message you left'))), walSock.texts());
+  await returned.close();
 
   await Bun.sleep(4000);
   const steady = await wal.tool('list_agents');
@@ -951,8 +1083,6 @@ async function twoRelays() {
   check('a relay without the shared secret is turned away', (await closed) === 4001);
 }
 
-// Claude Code's own registry of the sessions open on this machine, as its
-// SendMessage reads it.
 function register(name: string, socket: string, pid?: number) {
   const proc = pid === undefined ? Bun.spawn(['sleep', '600']) : undefined;
   if (proc) cleanup.push(() => proc.kill());
@@ -1017,6 +1147,8 @@ try {
   console.log(`parley ${VERSION} on ${RUN[0]}`);
   sealing();
   const pair = await messaging();
+  await mailAtRelay();
+  await daemon(pair);
   await forgery(pair);
   await names(pair);
   await olderContacts(pair);
@@ -1039,7 +1171,6 @@ try {
     try {
       await done();
     } catch {
-      // already closed
     }
   }
   relay.stop(true);

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from '
 import type { ServerWebSocket } from 'bun';
 import { readAttestation } from './attest';
 import { addressOf, verifyText } from './crypto';
+import { Mail, OPKS_LOW } from './mail';
 
 export const RELAY_AUTH = 'parley relay auth ';
 
@@ -13,6 +14,9 @@ const MAX_PER_WINDOW = 300;
 const MAX_BYTES_PER_WINDOW = 4 * 1024 * 1024;
 export const MAX_PER_IP = 100;
 const MAX_PER_ACCOUNT = 50;
+const TAKES_WINDOW_MS = 3600_000;
+export const TAKES_MAX = 60;
+export const TAKES_PER_ID = 5;
 const NEEDS_ACCOUNT = 'this relay needs a parley account: update parley and link this name';
 
 type Conn = {
@@ -25,14 +29,12 @@ type Conn = {
   windowStart: number;
   count: number;
   bytes: number;
+  takes?: { start: number; total: number; perId: Map<string, number> };
   helloTimer?: ReturnType<typeof setTimeout>;
   expiryTimer?: ReturnType<typeof setTimeout>;
 };
 
-// Relays that share one address pass messages between them, so two names
-// reach each other whichever relay each is connected to. Every relay dials
-// every other and sends over the link it dialled; `self` and what `discover`
-// returns are the ws URLs the relays reach each other at.
+// Every relay dials every other and sends over the link it dialled.
 export type Peering = {
   port: number;
   hostname: string;
@@ -63,25 +65,28 @@ const bump = (counts: Map<string, number>, key: string, by: number) => {
   else counts.delete(key);
 };
 
-// The relay only learns who is online and who is talking to whom. Payloads
-// are signed and sealed between the two ends before they get here.
-export function startRelay(port: number, hostname: string, opts: { issuers?: string[]; peers?: Peering; talksFile?: string } = {}) {
+export type RelayOptions = {
+  issuers?: string[];
+  peers?: Peering;
+  talksFile?: string;
+  // Set on one relay; the others pass mail to it. Unset on a lone relay keeps mail in memory.
+  mailDir?: string;
+};
+
+export function startRelay(port: number, hostname: string, opts: RelayOptions = {}) {
   const issuers = opts.issuers ?? [];
   const accounts = issuers.length > 0;
   const online = new Map<string, ServerWebSocket<Conn>>();
   const perIp = new Map<string, number>();
   const perSub = new Map<string, number>();
   let connections = 0;
-  // Which peer relay each name elsewhere is connected to, and the open links
-  // this relay dialled.
   const remote = new Map<string, string>();
   const links = new Map<string, WebSocket>();
   const dialling = new Set<string>();
-  // Addresses that turned out to be this relay under another spelling.
   const own = new Set<string>();
+  const mail = opts.mailDir || !opts.peers ? new Mail(opts.mailDir, log) : undefined;
+  let keeper: string | undefined;
 
-  // Who each id has exchanged messages with and when last: in memory, and in
-  // `talksFile` if the relay is given one.
   const talks = new Map<string, Map<string, number>>();
   const { talksFile } = opts;
   let talkSave: ReturnType<typeof setTimeout> | undefined;
@@ -122,8 +127,14 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     for (const link of links.values()) link.send(text);
   }
 
+  const toKeeper = (frame: object): boolean => {
+    const link = keeper && links.get(keeper);
+    if (!link) return false;
+    link.send(JSON.stringify(frame));
+    return true;
+  };
+
   function talked(a: string, b: string, share: boolean) {
-    // A session sends to itself to see that the relay still answers.
     if (a === b) return;
     const now = Date.now();
     const known = now - (talks.get(a)?.get(b) ?? 0) < TALK_SHARE_MS;
@@ -138,26 +149,48 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     if (share && !known) toPeers({ t: 'talk', a, b });
   }
 
-  const talkSweep = setInterval(() => {
+  const sweep = setInterval(() => {
     dropOldTalks();
     saveTalks();
+    mail?.sweep();
   }, 3600_000);
 
   function forget(peer: string) {
     for (const [address, at] of remote) if (at === peer) remote.delete(address);
   }
 
-  // A name that connects to another relay has left this one.
+  function arrived(address: string) {
+    if (!mail?.has(address)) return;
+    const frames = mail.arrived(address);
+    const to = online.get(address);
+    if (to) {
+      to.send(JSON.stringify({ t: 'prekeys', left: mail.left(address) }));
+      for (const f of frames) to.send(JSON.stringify({ t: 'recv', from: f.from, payload: f.payload, held: { seq: f.seq, at: f.at } }));
+      return;
+    }
+    const link = links.get(remote.get(address) ?? '');
+    if (!link) return;
+    link.send(JSON.stringify({ t: 'mail', op: 'left', to: address, left: mail.left(address) }));
+    for (const f of frames) link.send(JSON.stringify({ t: 'fwd', to: address, from: f.from, payload: f.payload, held: { seq: f.seq, at: f.at } }));
+  }
+
+  function tellLeft(address: string, left: number) {
+    const to = online.get(address);
+    if (to) to.send(JSON.stringify({ t: 'prekeys', left }));
+    else links.get(remote.get(address) ?? '')?.send(JSON.stringify({ t: 'mail', op: 'left', to: address, left }));
+  }
+
   function elsewhere(address: string, peer: string) {
     remote.set(address, peer);
     online.get(address)?.close(4002, 'replaced by a newer connection');
+    arrived(address);
   }
 
   function dial(peer: string, secret: string, self: string) {
     dialling.add(peer);
     const link = new WebSocket(peer);
     link.onopen = () => {
-      link.send(JSON.stringify({ t: 'peer', secret, from: self }));
+      link.send(JSON.stringify({ t: 'peer', secret, from: self, keeps: mail !== undefined }));
       link.send(JSON.stringify({ t: 'ids', addresses: [...online.keys()] }));
       links.set(peer, link);
       log('peer link up', peer);
@@ -173,6 +206,31 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     link.onerror = () => {};
   }
 
+  function route(from: string, to: string, ref: unknown, payload: unknown, hold: boolean, bytes: number): { t: string; why?: string } | undefined {
+    const target = online.get(to);
+    if (target) {
+      target.send(JSON.stringify({ t: 'recv', from, payload }));
+      talked(from, to, true);
+      return undefined;
+    }
+    const link = links.get(remote.get(to) ?? '');
+    if (link) {
+      link.send(JSON.stringify({ t: 'fwd', to, from, ref, payload }));
+      return undefined;
+    }
+    if (!hold) return { t: 'undeliverable' };
+    if (mail) {
+      const kept = mail.hold(from, to, payload, bytes);
+      if (kept === 'held') {
+        talked(from, to, true);
+        return { t: 'held' };
+      }
+      return { t: 'undeliverable', why: kept };
+    }
+    if (toKeeper({ t: 'mail', op: 'hold', from, to, ref, payload, bytes })) return undefined;
+    return { t: 'undeliverable', why: 'no mailbox' };
+  }
+
   function fromPeer(ws: ServerWebSocket<PeerConn>, msg: any, secret: string, self: string) {
     if (!ws.data.peer) {
       if (msg.t !== 'peer' || !sameSecret(secret, msg.secret) || typeof msg.from !== 'string') {
@@ -186,6 +244,7 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
       }
       clearTimeout(ws.data.helloTimer);
       ws.data.peer = msg.from;
+      if (msg.keeps === true && !mail) keeper = msg.from;
       return;
     }
     const { peer } = ws.data;
@@ -199,7 +258,7 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     } else if (msg.t === 'fwd' && typeof msg.to === 'string' && typeof msg.from === 'string') {
       const target = online.get(msg.to);
       if (target) {
-        target.send(JSON.stringify({ t: 'recv', from: msg.from, payload: msg.payload }));
+        target.send(JSON.stringify({ t: 'recv', from: msg.from, payload: msg.payload, ...(msg.held ? { held: msg.held } : {}) }));
         talked(msg.from, msg.to, true);
       } else links.get(peer)?.send(JSON.stringify({ t: 'nack', to: msg.to, from: msg.from, ref: msg.ref }));
     } else if (msg.t === 'nack' && typeof msg.to === 'string' && typeof msg.from === 'string') {
@@ -207,6 +266,40 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
       online.get(msg.from)?.send(JSON.stringify({ t: 'undeliverable', to: msg.to, ref: msg.ref }));
     } else if (msg.t === 'talk' && typeof msg.a === 'string' && typeof msg.b === 'string') {
       talked(msg.a, msg.b, false);
+    } else if (msg.t === 'mail' && typeof msg.op === 'string') {
+      fromPeerMail(peer, msg);
+    }
+  }
+
+  function fromPeerMail(peer: string, msg: any) {
+    const back = (frame: object) => links.get(peer)?.send(JSON.stringify(frame));
+    if (mail) {
+      if (msg.op === 'hold' && typeof msg.from === 'string' && typeof msg.to === 'string') {
+        const out = route(msg.from, msg.to, msg.ref, msg.payload, true, Number(msg.bytes) || 0);
+        if (out) back({ t: 'mail', op: out.t, to: msg.from, target: msg.to, ref: msg.ref, why: out.why });
+      } else if (msg.op === 'put' && typeof msg.from === 'string' && typeof msg.publicKey === 'string') {
+        try {
+          back({ t: 'mail', op: 'left', to: msg.from, left: mail.put(msg.from, msg.publicKey, msg.spk, msg.opks) });
+        } catch (err) {
+          back({ t: 'mail', op: 'error', to: msg.from, error: err instanceof Error ? err.message : String(err) });
+        }
+      } else if (msg.op === 'take' && typeof msg.from === 'string' && typeof msg.id === 'string') {
+        const got = mail.take(msg.id);
+        back({ t: 'mail', op: 'bundle', to: msg.from, id: msg.id, ...(got?.bundle ?? {}) });
+        if (got && got.left < OPKS_LOW) tellLeft(msg.id, got.left);
+      } else if (msg.op === 'took' && typeof msg.from === 'string') {
+        mail.took(msg.from, Number(msg.seq));
+      }
+      return;
+    }
+    const to = typeof msg.to === 'string' ? online.get(msg.to) : undefined;
+    if (!to) return;
+    if (msg.op === 'held' || msg.op === 'undeliverable') to.send(JSON.stringify({ t: msg.op, to: msg.target, ref: msg.ref, ...(msg.why ? { why: msg.why } : {}) }));
+    else if (msg.op === 'left') to.send(JSON.stringify({ t: 'prekeys', left: msg.left }));
+    else if (msg.op === 'error') to.send(JSON.stringify({ t: 'prekeys', error: msg.error }));
+    else if (msg.op === 'bundle') {
+      const { t: _t, op: _op, to: _to, ...rest } = msg;
+      to.send(JSON.stringify({ t: 'prekeys', ...rest }));
     }
   }
 
@@ -237,7 +330,10 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
         },
         close(ws) {
           clearTimeout(ws.data.helloTimer);
-          if (ws.data.peer) forget(ws.data.peer);
+          if (ws.data.peer) {
+            forget(ws.data.peer);
+            if (keeper === ws.data.peer) keeper = undefined;
+          }
         },
       },
     });
@@ -305,6 +401,44 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     ws.data.publicKey = msg.publicKey;
     log('online', address);
     ws.send(JSON.stringify({ t: 'ready', address }));
+    arrived(address);
+  }
+
+  function mayTake(ws: ServerWebSocket<Conn>, id: string): boolean {
+    const now = Date.now();
+    let t = ws.data.takes;
+    if (!t || now - t.start > TAKES_WINDOW_MS) t = ws.data.takes = { start: now, total: 0, perId: new Map() };
+    if (t.total >= TAKES_MAX || (t.perId.get(id) ?? 0) >= TAKES_PER_ID) return false;
+    t.total++;
+    bump(t.perId, id, 1);
+    return true;
+  }
+
+  function prekeys(ws: ServerWebSocket<Conn>, msg: any) {
+    const me = ws.data.address!;
+    if (typeof msg.id === 'string') {
+      if (!mayTake(ws, msg.id)) {
+        ws.send(JSON.stringify({ t: 'prekeys', id: msg.id, error: 'too many prekeys taken; try again in an hour' }));
+        return;
+      }
+      if (mail) {
+        const got = mail.take(msg.id);
+        ws.send(JSON.stringify({ t: 'prekeys', id: msg.id, ...(got?.bundle ?? {}) }));
+        if (got && got.left < OPKS_LOW) tellLeft(msg.id, got.left);
+      } else if (!toKeeper({ t: 'mail', op: 'take', from: me, id: msg.id })) {
+        ws.send(JSON.stringify({ t: 'prekeys', id: msg.id }));
+      }
+      return;
+    }
+    if (mail) {
+      try {
+        ws.send(JSON.stringify({ t: 'prekeys', left: mail.put(me, ws.data.publicKey!, msg.spk, msg.opks) }));
+      } catch (err) {
+        ws.send(JSON.stringify({ t: 'prekeys', error: err instanceof Error ? err.message : String(err) }));
+      }
+    } else if (!toKeeper({ t: 'mail', op: 'put', from: me, publicKey: ws.data.publicKey, spk: msg.spk, opks: msg.opks })) {
+      ws.send(JSON.stringify({ t: 'prekeys', error: 'this relay keeps no mail' }));
+    }
   }
 
   function clientIp(req: Request, peer: string): string {
@@ -317,16 +451,15 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
     port,
     hostname,
     fetch(req, server) {
-      // Which of these ids have a session open, here or on a peer relay. It
-      // tells no more than sending to an id does. Who each has talked with
-      // tells more, so only a caller on this machine is given it.
+      // Who talked with whom is for a caller on this machine only.
       if (req.method === 'POST' && new URL(req.url).pathname === '/online') {
         const local = LOOPBACK.has(clientIp(req, server.requestIP(req)?.address ?? ''));
         return req.json().then(
           (body: any) => {
             const ids: string[] = Array.isArray(body?.ids) ? body.ids.slice(0, 500).map(String) : [];
-            const answer: { online: string[]; talks?: Record<string, [string, number][]> } = {
+            const answer: { online: string[]; reachable: string[]; talks?: Record<string, [string, number][]> } = {
               online: ids.filter((id) => online.has(id) || links.has(remote.get(id) ?? '')),
+              reachable: mail ? ids.filter((id) => mail.has(id)) : [],
             };
             if (local) answer.talks = Object.fromEntries(ids.filter((id) => talks.has(id)).map((id) => [id, [...talks.get(id)!].reverse()]));
             return Response.json(answer);
@@ -372,7 +505,8 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
           ws.data.count = 0;
           ws.data.bytes = 0;
         }
-        ws.data.bytes += typeof raw === 'string' ? Buffer.byteLength(raw) : raw.byteLength;
+        const bytes = typeof raw === 'string' ? Buffer.byteLength(raw) : raw.byteLength;
+        ws.data.bytes += bytes;
         if (ws.data.bytes > MAX_BYTES_PER_WINDOW) {
           ws.close(4029, 'too much data');
           return;
@@ -393,27 +527,15 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
           admit(ws, msg.att, ws.data.publicKey!);
           return;
         }
-        if (msg.t !== 'send' || typeof msg.to !== 'string') return;
-        const target = online.get(msg.to);
-        if (!target) {
-          const link = links.get(remote.get(msg.to) ?? '');
-          if (link) {
-            link.send(JSON.stringify({ t: 'fwd', to: msg.to, from: ws.data.address, ref: msg.ref, payload: msg.payload }));
-            return;
-          }
-          ws.send(
-            JSON.stringify({ t: 'undeliverable', to: msg.to, ref: msg.ref }),
-          );
+        if (msg.t === 'prekeys') return prekeys(ws, msg);
+        if (msg.t === 'took') {
+          if (mail) mail.took(ws.data.address, Number(msg.seq));
+          else toKeeper({ t: 'mail', op: 'took', from: ws.data.address, seq: msg.seq });
           return;
         }
-        target.send(
-          JSON.stringify({
-            t: 'recv',
-            from: ws.data.address,
-            payload: msg.payload,
-          }),
-        );
-        talked(ws.data.address!, msg.to, true);
+        if (msg.t !== 'send' || typeof msg.to !== 'string') return;
+        const out = route(ws.data.address, msg.to, msg.ref, msg.payload, msg.hold === true, bytes);
+        if (out) ws.send(JSON.stringify({ t: out.t, to: msg.to, ref: msg.ref, ...(out.why ? { why: out.why } : {}) }));
       },
       close(ws) {
         connections--;
@@ -433,8 +555,9 @@ export function startRelay(port: number, hostname: string, opts: { issuers?: str
   const stop = server.stop.bind(server);
   server.stop = (closeActive?: boolean) => {
     clearInterval(dialTimer);
-    clearInterval(talkSweep);
+    clearInterval(sweep);
     if (talkSave) saveTalks();
+    mail?.stop();
     for (const link of links.values()) link.close();
     void peerServer?.stop(closeActive);
     return stop(closeActive);

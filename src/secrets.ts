@@ -5,11 +5,7 @@ import { signText, type Identity } from './crypto';
 import { readJson, writeJson } from './home';
 import { checkLabel, putSecret, ruleText, type Rule } from './vault';
 
-// A secret a person types into the cloud's page. The page seals it in their
-// browser to a key made here for that one request, so the cloud carries
-// something it cannot open, and the value goes from here into the vault
-// without passing through a session.
-
+// Sealed in the browser to a key made here per request, so the cloud cannot open it.
 type Pending = { label: string; use: Rule[]; key: JsonWebKey; link: string; askedAt: string; expires: string };
 
 const FAST_MS = 4000;

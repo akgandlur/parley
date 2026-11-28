@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { linkFor } from './account';
 import { isAddress, normalizeAddress } from './crypto';
+import { daemonCall, runDaemon } from './daemon';
 import { loadContacts, loadIdentity, loadTrusted, locals, mine, readJson, sameName, saveTrusted, type Local } from './home';
 import { runMcp } from './mcp';
 import { startRelay, type Peering } from './relay';
@@ -22,9 +23,13 @@ const USAGE = `parley: messages between Claude Code sessions on different machin
   Add --as <name> to say which one a command is for.
 
   parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
+  parley daemon [status | stop]
+                            the background process that keeps names here reachable while no session holds them;
+                            a session starts it by itself
   parley relay [--port 8787] [--host 0.0.0.0] [--issuer <key>]...
                             --issuer (or PARLEY_RELAY_ISSUERS, comma-separated) admits only names with an account proof
-                            PARLEY_RELAY_PEER_DNS or PARLEY_RELAY_PEERS joins several relays behind one address; see the README`;
+                            PARLEY_RELAY_PEER_DNS or PARLEY_RELAY_PEERS joins several relays behind one address; see the README
+                            PARLEY_RELAY_MAIL is the folder mail is kept in; with peering, set it on one relay`;
 
 const [command, ...rest] = process.argv.slice(2);
 
@@ -57,9 +62,6 @@ function pick(): Local {
   return found;
 }
 
-// Several relays behind one address: PARLEY_RELAY_PEER_DNS names a record
-// that lists every relay's address (PARLEY_RELAY_PEER_SELF is this one's), or
-// PARLEY_RELAY_PEERS lists their ws URLs (PARLEY_RELAY_PEER_URL is this one's).
 function peering(): Peering | undefined {
   const { PARLEY_RELAY_PEER_DNS: name, PARLEY_RELAY_PEERS: urls } = process.env;
   if (!name && !urls) return undefined;
@@ -170,6 +172,19 @@ async function main() {
     }
     case 'mcp':
       return runMcp();
+    case 'daemon': {
+      if (rest[0] === 'status') {
+        const s = await daemonCall('status');
+        if (!s) return console.log('No parley daemon is running on this machine.');
+        return console.log([`parley daemon ${s.version} (pid ${s.pid}) holds:`, ...(s.names.length ? s.names.map((n: any) => `  "${n.name}" (${n.address}): ${n.connected ? 'connected' : 'not connected'}`) : ['  nothing: every name here is held by a session, or there is none'])].join('\n'));
+      }
+      if (rest[0] === 'stop') {
+        const s = await daemonCall('stop');
+        return console.log(s ? 'The parley daemon is stopping.' : 'No parley daemon is running on this machine.');
+      }
+      if (rest[0]) throw new Error('use `parley daemon`, `parley daemon status` or `parley daemon stop`');
+      return runDaemon();
+    }
     case 'relay': {
       if (typeof Bun === 'undefined') {
         throw new Error('the relay runs on Bun: use the parley binary, or `bun src/cli.ts relay`');
@@ -183,7 +198,7 @@ async function main() {
         }),
         ...(process.env.PARLEY_RELAY_ISSUERS ?? '').split(',').map((k) => k.trim()).filter(Boolean),
       ];
-      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers, peers: peering(), talksFile: process.env.PARLEY_RELAY_TALKS });
+      const server = startRelay(Number(flag('--port') ?? 8787), flag('--host') ?? '0.0.0.0', { issuers, peers: peering(), talksFile: process.env.PARLEY_RELAY_TALKS, mailDir: process.env.PARLEY_RELAY_MAIL });
       return console.log(`parley relay listening on ${server.hostname}:${server.port}`);
     }
     default:

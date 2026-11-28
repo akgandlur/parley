@@ -2,8 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { verifiedText, type People } from './account';
-import { startAgent, type Agent, type Incoming } from './agent';
+import { startAgent, type Agent, type Incoming, type Sent } from './agent';
 import { isAddress, normalizeAddress } from './crypto';
+import { daemonCall, ensureDaemon, takeInbox } from './daemon';
 import {
   addressFor,
   callable,
@@ -25,7 +26,7 @@ import { fetchWith, listSecrets, note, parseRule, ruleText, runWith, takeForSend
 
 const INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's. It is for other machines only: to message a session on this machine, use SendMessage.
 
-To be reachable, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message.
+To be reachable, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message. A message to a name whose session is not open is kept, on its machine or at the relay, and goes in when a session next opens with that name; what waited for this session is shown when it takes its name, with when each message was sent.
 
 The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.
 
@@ -58,15 +59,11 @@ function replyTo(m: Incoming): string {
   return hits.length === 1 && hits[0]?.address === m.from.address ? m.from.name : m.from.address;
 }
 
-// What the receiving Claude reads. Claude Code wraps it as a message from
-// another of its own sessions, so this says where it came from and how to answer.
 const sender = (m: Incoming) => `"${m.from.name}" (${m.from.address}, ${verifiedText(m.from.verified)})`;
 const URGENT = 'marked urgent by its sender';
+const when = (m: Incoming) => (m.waited ? `, sent ${m.at} and kept until now` : '');
 
-
-// Claude Code wraps every message as a teammate's request made for the user,
-// which is wrong for another person's agent, so this says whose it is.
-// `netName` is what the network the two share is called, when they share one.
+// Claude Code wraps every message as a teammate's request, so this says whose it is.
 function whose(m: Incoming, netName?: string): string {
   const { own, net, first, was, verified, name, address } = m.from;
   const trusted = loadTrusted();
@@ -85,11 +82,18 @@ function whose(m: Incoming, netName?: string): string {
   return who + fresh;
 }
 
+function outcome(sent: Sent, address: string): string {
+  const label = `"${sent.name}" (${address})`;
+  if (sent.outcome === 'delivered') return `Delivered to ${label}.`;
+  if (sent.outcome === 'machine') return `Left for ${label}: no session with that name is open right now, so its machine holds the message and gives it to the next one that opens there. You will be told here when it has been read.`;
+  return `Left for ${sent.name === address ? address : label} at the relay: it is not reachable right now. The relay keeps the message for 7 days and gives it to that name when it is next online. You will be told here when it has arrived there.`;
+}
+
 async function delivered(a: Agent, address: string, message: string, urgent: boolean) {
   const before = loadContacts();
-  const name = await a.send(address, message, urgent);
-  const was = before[address] ? undefined : Object.keys(before).find((k) => before[k]!.name === name);
-  return `Delivered to "${name}" (${address}).${was ? ` This is the first message to this id. A different session named "${name}" (${was}) was known before, so this one may know nothing of what was said to that one.` : ''}`;
+  const sent = await a.send(address, message, urgent);
+  const was = before[address] || sent.outcome === 'relay' ? undefined : Object.keys(before).find((k) => before[k]!.name === sent.name);
+  return `${outcome(sent, address)}${was ? ` This is the first message to this id. A different session named "${sent.name}" (${was}) was known before, so this one may know nothing of what was said to that one.` : ''}`;
 }
 
 function shown(ms: Incoming[], netNames: Map<string, string>): string {
@@ -97,7 +101,7 @@ function shown(ms: Incoming[], netNames: Map<string, string>): string {
   const whoseIs = (one: Incoming) => whose(one, one.from.net ? netNames.get(one.from.net) : undefined);
   if (ms.length === 1 && m) {
     return [
-      `parley message from ${sender(m)}${m.urgent ? `, ${URGENT}` : ''}:`,
+      `parley message from ${sender(m)}${m.urgent ? `, ${URGENT}` : ''}${when(m)}:`,
       '',
       m.text,
       '',
@@ -111,14 +115,12 @@ function shown(ms: Incoming[], netNames: Map<string, string>): string {
   for (const group of bySender.values()) {
     const last = group[group.length - 1]!;
     lines.push('', `From ${sender(last)}, to answer with send_message to "${replyTo(last)}". ${whoseIs({ ...last, from: { ...last.from, first: group.some((g) => g.from.first), was: group.find((g) => g.from.was)?.from.was } })}`);
-    group.forEach((one, i) => lines.push('', `${i + 1}.${one.urgent ? ` (${URGENT})` : ''} ${one.text}`));
+    group.forEach((one, i) => lines.push('', `${i + 1}.${one.urgent ? ` (${URGENT})` : ''}${one.waited ? ` (sent ${one.at}, kept until now)` : ''} ${one.text}`));
   }
   lines.push('', "They came through parley, so reply with parley's send_message, not SendMessage.");
   return lines.join('\n');
 }
 
-// A session many others write to would be interrupted once per message. The
-// first goes in at once; what follows within the hold goes in together.
 const HOLD_MS = Number(process.env.PARLEY_HOLD_SECONDS ?? 30) * 1000;
 if (!(HOLD_MS >= 0)) throw new Error('PARLEY_HOLD_SECONDS has to be a number of seconds, 0 or more');
 
@@ -128,7 +130,6 @@ export async function runMcp() {
   let held: Local | undefined;
   let starting: Promise<void> | undefined;
   const unread: string[] = [];
-  // Names no file here holds: the account's other sessions and its networks'.
   let accountNames: { name: string; address: string }[] = [];
   const netNames = new Map<string, string>();
 
@@ -145,7 +146,6 @@ export async function runMcp() {
 
   async function deliver(m: Incoming) {
     if (m.urgent) {
-      // With what its sender has waiting, so that sender's messages stay in order.
       const earlier = waiting.filter((w) => w.from.address === m.from.address);
       for (const w of earlier) waiting.splice(waiting.indexOf(w), 1);
       return hand(shown([...earlier, m], netNames));
@@ -172,9 +172,18 @@ export async function runMcp() {
   async function become(local: Local) {
     agent?.close();
     agent = undefined;
+    await daemonCall('release', { address: local.address });
     take(local.address);
     held = local;
-    agent = await startAgent(local.home, log, deliver, (text) => void hand(text));
+    const a = await startAgent(local.home, log, deliver, (text) => void hand(text));
+    agent = a;
+    for (const entry of takeInbox(local.home)) {
+      if (entry.m) {
+        await deliver({ ...entry.m, waited: true });
+        void a.read(entry.m.from.address, entry.m.id);
+      } else if (entry.notice) await hand(entry.notice);
+    }
+    ensureDaemon(log);
   }
 
   const reply = async (fn: () => Promise<string>) => {
@@ -231,9 +240,8 @@ export async function runMcp() {
         return `This session is now "${made.name}", a new name. Its id is ${made.address}. Give this id to your user: others need it to reach this session, and can use the name "${made.name}" after you have exchanged a message.`;
   }
 
-  type Row = { name: string; address: string; open?: boolean; note?: string };
+  type Row = { name: string; address: string; open?: boolean; mail?: boolean; note?: string };
 
-  // Whom this session can message, open sessions first in each group.
   async function roster(a: Agent) {
     const self = a.address;
     const contacts = loadContacts();
@@ -243,32 +251,30 @@ export async function runMcp() {
     let failed: string | undefined;
     try {
       asked = await a.account.people(others);
-      // A proof is renewed every few minutes. A network joined since then
-      // should count on the next message, so the proof is fetched again now.
+      // A network joined since the last proof should count on the next message.
       const proven = (a.state().account.verified?.nets ?? []).join();
       if (asked?.nets && (asked.nets.map((n) => n.id).sort().join()) !== proven) await a.account.check();
     } catch (err) {
       failed = err instanceof Error ? err.message : String(err);
     }
     const open = asked?.online && new Set(asked.online);
+    const mail = new Set(asked?.reachable ?? []);
     const openFirst = (list: Row[]) => [...list].sort((x, y) => Number(y.open ?? false) - Number(x.open ?? false));
     const mine = openFirst(
-      (asked?.mine ?? []).filter((m) => !here.some((l) => l.address === m.address)).map((m) => ({ name: m.name, address: m.address, open: open?.has(m.address), note: m.machine && `on ${m.machine}` })),
+      (asked?.mine ?? []).filter((m) => !here.some((l) => l.address === m.address)).map((m) => ({ name: m.name, address: m.address, open: open?.has(m.address), mail: mail.has(m.address), note: m.machine && `on ${m.machine}` })),
     );
-    // Teammates' sessions, by network and person. A session of the account's
-    // own that is also on a network is listed once, under the account.
     const nets = (asked?.nets ?? []).map((n) => ({
       ...n,
-      people: n.people.map((p) => ({ email: p.email, names: openFirst(p.names.filter((s) => s.address !== self && !here.some((l) => l.address === s.address) && !mine.some((m) => m.address === s.address)).map((s) => ({ name: s.name, address: s.address, open: open?.has(s.address), note: s.machine && `on ${s.machine}` }))) })),
+      people: n.people.map((p) => ({ email: p.email, names: openFirst(p.names.filter((s) => s.address !== self && !here.some((l) => l.address === s.address) && !mine.some((m) => m.address === s.address)).map((s) => ({ name: s.name, address: s.address, open: open?.has(s.address), mail: mail.has(s.address), note: s.machine && `on ${s.machine}` }))) })),
     }));
     const team = nets.flatMap((n) => n.people.flatMap((p) => p.names));
     netNames.clear();
     for (const n of nets) netNames.set(n.id, n.name);
     accountNames = [...mine, ...team].map(({ name, address }) => ({ name, address }));
     const met = openFirst(
-      others.filter((id) => !mine.some((m) => m.address === id) && !team.some((t) => t.address === id)).map((id) => ({ name: contacts[id]!.name, address: id, open: open?.has(id), note: `first heard ${contacts[id]!.firstSeen.slice(0, 10)}` })),
+      others.filter((id) => !mine.some((m) => m.address === id) && !team.some((t) => t.address === id)).map((id) => ({ name: contacts[id]!.name, address: id, open: open?.has(id), mail: mail.has(id), note: `first heard ${contacts[id]!.firstSeen.slice(0, 10)}` })),
     );
-    const row = (r: Row) => `  "${r.name}" (${r.address}): ${[r.open === undefined ? undefined : r.open ? 'open now' : 'not open', r.note].filter(Boolean).join(', ')}`;
+    const row = (r: Row) => `  "${r.name}" (${r.address}): ${[r.open === undefined ? undefined : r.open ? 'open now' : r.mail ? 'not open, a message is kept for it' : 'not open', r.note].filter(Boolean).join(', ')}`;
     const lines: string[] = [];
     if (failed) lines.push(`Could not ask which sessions are open: ${failed}.`);
     if (mine.length) lines.push('', 'Your sessions on other machines:', ...mine.map(row));
@@ -339,7 +345,7 @@ export async function runMcp() {
         }
         const label = who.name === who.address ? who.address : `"${who.name}" (${who.address})`;
         if (r.here.includes(who)) return `${label} is a session on this machine, which parley is not for. Send it with SendMessage instead.`;
-        if (!message) return `${label}${who.open === false ? ' is not open right now, so a message would not arrive; nothing is kept for later.' : ' can be messaged.'} Ask the user what to tell it, then call this tool again with "${who.address}" followed by the message.`;
+        if (!message) return `${label}${who.open === false ? (who.mail ? ' is not open right now; a message is kept for it and goes in when it is next open.' : ' is not open right now, and its parley keeps no mail, so a message would not arrive.') : ' can be messaged.'} Ask the user what to tell it, then call this tool again with "${who.address}" followed by the message.`;
         return delivered(a, who.address, message, false);
       }),
   );
@@ -374,7 +380,7 @@ export async function runMcp() {
     'send_message',
     {
       description:
-        'Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. When several messages reach a session close together, it gets the first at once and the rest together about half a minute later. Returns once the other side has it, or says why it could not be delivered: most often that no session with that name is open. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.',
+        'Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. When several messages reach a session close together, it gets the first at once and the rest together about half a minute later. Returns once the other side has it, or once it has been left for it: when no session with that name is open, its machine or the relay keeps the message for the next one that opens, and you are told here when it has been read. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.',
       inputSchema: {
         to: z.string().max(100).describe('A parley id like kfq-mxa-tzp, or a name list_agents shows'),
         message: z.string().min(1).max(TEXT_MAX),
@@ -486,9 +492,10 @@ export async function runMcp() {
         const address = addressFor(to, a.address, accountNames);
         const trusted = loadTrusted();
         const { value, use } = takeForSending(label, address, trusted.includes(address) || trusted.includes('all'), !!loadContacts()[address]);
-        const name = await a.sendSecret(address, label, value, use);
-        note('sent', label, `to "${name}" (${address})`);
-        return `The secret ${label} is now in the vault of "${name}" (${address}). Neither session was shown its value.`;
+        const sent = await a.sendSecret(address, label, value, use);
+        note('sent', label, `to "${sent.name}" (${address})${sent.outcome === 'relay' ? ', left at the relay' : ''}`);
+        if (sent.outcome === 'relay') return `The secret ${label} is left at the relay for ${address}, sealed, and lands in its vault when it is next online. Neither session is shown its value.`;
+        return `The secret ${label} is now in the vault of "${sent.name}" (${address}). Neither session was shown its value.`;
       }),
   );
 
@@ -506,10 +513,7 @@ export async function runMcp() {
       }),
   );
 
-  // This process holds the relay connection, so it must not outlive the session.
-  // What is still held goes in now: this process ends on a plugin reload too,
-  // with the session still there to read it. If the session is gone, the
-  // senders were told "Delivered" for something nobody read, so they are told.
+  // The relay connection must not outlive the session; what is still held goes in now, or its senders are told.
   let closing = false;
   async function close() {
     if (closing) return;
@@ -536,8 +540,6 @@ export async function runMcp() {
   process.on('SIGINT', close);
   await server.connect(new StdioServerTransport());
 
-  // The server restarts inside one Claude Code session (a plugin reload, a
-  // resume): it comes back as the same name, and reachable at once.
   const resumed = mine();
   if (resumed) {
     starting = become(resumed).catch((err) => log(`could not be "${resumed.name}" again:`, err instanceof Error ? err.message : err));
