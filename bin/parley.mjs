@@ -7837,7 +7837,6 @@ class Mail {
 import { existsSync as existsSync4 } from "node:fs";
 import { join as join4 } from "node:path";
 var OPKS_STOCK = 50;
-var OPKS_LOCAL_MAX = 150;
 var SPK_ROTATE_MS = 7 * 24 * 3600000;
 var SPK_PREVIOUS_MS = 7 * 24 * 3600000;
 var OPK_KEEP_MS = 30 * 24 * 3600000;
@@ -7885,12 +7884,11 @@ class Prekeys {
     const now = new Date().toISOString();
     for (let i = 0;i < more; i++)
       this.state.opks.push({ ...savePair(newPair()), at: now });
-    while (this.state.opks.length > OPKS_LOCAL_MAX)
-      this.state.opks.shift();
     if (more > 0)
       this.save();
     return { spk: { pub: this.state.spk.pub, sig: this.state.spk.sig }, opks: this.state.opks.map((o) => o.pub) };
   }
+  onHand = () => this.state.opks.length;
   signedPrekey(pub) {
     if (pub === this.state.spk.pub)
       return loadPair(this.state.spk);
@@ -8195,7 +8193,7 @@ ${code}`) }, hkdf, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
 }
 
 // src/types.ts
-var VERSION = "0.13.0";
+var VERSION = "0.13.1";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -8268,7 +8266,6 @@ async function startAgent(home, log, onMessage, onNotice) {
   const bundles = new Map;
   const seen = new Set;
   const told = new Map;
-  let stocked = 0;
   const account = startAccount(home, me, log, (att) => {
     if (socket && ready)
       socket.send(JSON.stringify({ t: "renew", att }));
@@ -8440,8 +8437,7 @@ async function startAgent(home, log, onMessage, onNotice) {
       retryMs = 2000;
       firstAnswer();
       log("connected to the relay as", msg.address);
-      leaveKeys(stocked ? 0 : OPKS_STOCK);
-      stocked = 1;
+      leaveKeys(prekeys.onHand() ? 0 : OPKS_STOCK);
     } else if (msg.t === "recv") {
       if (msg.from === address) {
         if (probe && msg.payload?.probe === probe.n)

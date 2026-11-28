@@ -5,7 +5,6 @@ import { readJson, writeJson } from './home';
 import { loadPair, newPair, savePair, signPrekey, type Pair, type SavedPair } from './ratchet';
 
 export const OPKS_STOCK = 50;
-const OPKS_LOCAL_MAX = 150;
 const SPK_ROTATE_MS = 7 * 24 * 3600_000;
 const SPK_PREVIOUS_MS = 7 * 24 * 3600_000;
 const OPK_KEEP_MS = 30 * 24 * 3600_000;
@@ -61,10 +60,11 @@ export class Prekeys {
   bundleToPut(more: number): { spk: { pub: string; sig: string }; opks: string[] } {
     const now = new Date().toISOString();
     for (let i = 0; i < more; i++) this.state.opks.push({ ...savePair(newPair()), at: now });
-    while (this.state.opks.length > OPKS_LOCAL_MAX) this.state.opks.shift();
     if (more > 0) this.save();
     return { spk: { pub: this.state.spk.pub, sig: this.state.spk.sig }, opks: this.state.opks.map((o) => o.pub) };
   }
+
+  onHand = () => this.state.opks.length;
 
   signedPrekey(pub: string): Pair | undefined {
     if (pub === this.state.spk.pub) return loadPair(this.state.spk);

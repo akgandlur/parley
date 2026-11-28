@@ -10,6 +10,7 @@ import { addressOf, newIdentity, signText, verifyText, type Identity } from '../
 import { answer, answerMail, canSeal, checkMailOffer, checkOffer, finish, loadPair, newPair, offer, offerMail, open, safetyNumber, savePair, seal, signPrekey } from '../src/ratchet';
 import { MAIL_FRAMES_MAX } from '../src/mail';
 import { machine } from '../src/host';
+import { Prekeys } from '../src/prekeys';
 import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Contact } from '../src/home';
 import { MAX_PER_IP, RELAY_AUTH, startRelay } from '../src/relay';
@@ -195,6 +196,11 @@ function sealing() {
   const noOpk = offerMail(ann, benAddr, { key: bundle.key, spk: bundle.spk });
   check('and a bundle with no one-time key still works', open(answerMail(ben, noOpk.hello, spk, undefined), seal(noOpk.ratchet, 'stock ran out')) === 'stock ran out');
   check('a prekey pair survives being saved', loadPair(savePair(spk)).publicKey === spk.publicKey && open(answerMail(ben, noOpk.hello, loadPair(savePair(spk)), undefined), seal(noOpk.ratchet, 'again')) === 'again');
+  const keysHome = mkdtempSync(join(base, 'keys-'));
+  const earliest = new Prekeys(keysHome, ben).bundleToPut(50).opks[0]!;
+  for (let i = 0; i < 5; i++) new Prekeys(keysHome, ben).bundleToPut(50);
+  const later = new Prekeys(keysHome, ben);
+  check('a one-time key left at the relay is kept however many times the name restarts', later.oneTime(earliest) !== undefined && later.onHand() === 300);
 }
 
 const A_ROOT = join(base, 'machine-a');

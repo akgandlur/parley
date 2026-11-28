@@ -138,7 +138,6 @@ export async function startAgent(
   const bundles = new Map<string, { resolve: (b: Bundle | undefined) => void }>();
   const seen = new Set<string>();
   const told = new Map<string, number>();
-  let stocked = 0;
 
   const account = startAccount(home, me, log, (att) => {
     if (socket && ready) socket.send(JSON.stringify({ t: 'renew', att }));
@@ -310,8 +309,7 @@ export async function startAgent(
       retryMs = 2000;
       firstAnswer();
       log('connected to the relay as', msg.address);
-      leaveKeys(stocked ? 0 : OPKS_STOCK);
-      stocked = 1;
+      leaveKeys(prekeys.onHand() ? 0 : OPKS_STOCK);
     } else if (msg.t === 'recv') {
       if (msg.from === address) {
         if (probe && msg.payload?.probe === probe.n) probe = undefined;
