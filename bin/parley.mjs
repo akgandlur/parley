@@ -6976,7 +6976,7 @@ var require_dist = __commonJS(function(exports, module) {
 });
 
 // src/cli.ts
-import { resolve6 } from "dns/promises";
+import { lookup } from "dns/promises";
 import { existsSync as existsSync14 } from "fs";
 import { join as join16 } from "path";
 
@@ -8193,7 +8193,7 @@ ${code}`) }, hkdf, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
 }
 
 // src/types.ts
-var VERSION = "0.13.2";
+var VERSION = "0.13.3";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -25280,7 +25280,7 @@ function peering() {
     hostname: process.env.PARLEY_RELAY_PEER_HOST ?? "::",
     secret,
     self: name ? at(own) : own,
-    discover: name ? async () => (await resolve6(name)).map(at) : async () => urls.split(",").map((u) => u.trim()).filter(Boolean)
+    discover: name ? async () => (await lookup(name, { all: true, family: 6 })).map((a) => at(a.address)) : async () => urls.split(",").map((u) => u.trim()).filter(Boolean)
   };
 }
 async function main() {

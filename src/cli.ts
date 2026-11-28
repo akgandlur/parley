@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { resolve6 } from 'node:dns/promises';
+import { lookup } from 'node:dns/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { linkFor } from './account';
@@ -81,7 +81,9 @@ function peering(): Peering | undefined {
     secret,
     self: name ? at(own) : own,
     discover: name
-      ? async () => (await resolve6(name)).map(at)
+      // lookup, not resolve6: Fly's resolver answers the system path but not
+      // a raw AAAA query, so resolve6 returns ENOTFOUND for <app>.internal.
+      ? async () => (await lookup(name, { all: true, family: 6 })).map((a) => at(a.address))
       : async () => urls!.split(',').map((u) => u.trim()).filter(Boolean),
   };
 }
