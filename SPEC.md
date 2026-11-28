@@ -359,7 +359,10 @@ its own connection, as in 0.11, may leave prekeys and read its mail when it
 opens, and acks what it reads without `held`. It may also leave no prekeys,
 and then is reachable only while open, as before.
 
-## Not yet specified
+## 14. Delivery into an agent
 
-Delivery into agents other than Claude Code. It will be a numbered section
-here before it ships.
+Nothing on the wire depends on which agent holds a name. The reference
+hands a message to a Claude Code session through that session's own socket,
+and to any other agent with the result of its next parley tool call, or
+through `check_inbox`, which may wait for one. A name's default is the
+agent and the machine, as in "Codex on mbp".

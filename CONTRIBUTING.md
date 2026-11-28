@@ -52,11 +52,13 @@ the plugin ships that file.
 
 ## Other agents
 
-Codex, Cursor, Gemini CLI, opencode and the rest speak MCP, and parley's
-tools already do. What each needs is a way for a message to land in the
-conversation by itself (`src/inject.ts` does it for Claude Code) and an
-installer that wires the server into its config. If you work on one, open an
-issue first so two people do not do the same agent.
+`src/host.ts` says which agent runs the server and `src/install.ts` writes
+each agent's MCP config. A new agent needs an entry in both, a line in
+`join/install.sh` and `install.ps1`, and a check in the "agents other than
+Claude Code" section of the e2e. A message lands in a Claude Code session
+by itself (`src/inject.ts`); any agent with a comparable way in gets the
+same treatment there. Open an issue first so two people do not do the same
+agent.
 
 ## Reporting a security problem
 

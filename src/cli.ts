@@ -5,13 +5,15 @@ import { join } from 'node:path';
 import { linkFor } from './account';
 import { isAddress, normalizeAddress } from './crypto';
 import { daemonCall, runDaemon } from './daemon';
+import { INSTALLABLE } from './host';
+import { agentList, install, isInstallable } from './install';
 import { loadContacts, loadIdentity, loadTrusted, locals, mine, readJson, sameName, saveTrusted, type Local } from './home';
 import { runMcp } from './mcp';
 import { startRelay, type Peering } from './relay';
 import { setUp } from './setup';
 import { allow, listSecrets, parseRule, readLog, removeSecret, ruleText, share } from './vault';
 
-const USAGE = `parley: messages between Claude Code sessions on different machines
+const USAGE = `parley: messages between AI agent sessions on different machines
 
   parley init --name <name> --relay <ws url>
   parley id                 show the names on this machine and their ids
@@ -22,7 +24,9 @@ const USAGE = `parley: messages between Claude Code sessions on different machin
   A machine can hold several names, one for each Claude Code session.
   Add --as <name> to say which one a command is for.
 
-  parley mcp                the MCP server Claude Code runs (claude mcp add parley -- parley mcp)
+  parley mcp                the MCP server an agent runs
+  parley install <agent>    put parley into an agent's MCP config: codex, cursor, gemini, opencode, copilot, or all
+                            (Claude Code takes the plugin instead: claude plugin install parley@parley)
   parley daemon [status | stop]
                             the background process that keeps names here reachable while no session holds them;
                             a session starts it by itself
@@ -172,6 +176,12 @@ async function main() {
     }
     case 'mcp':
       return runMcp();
+    case 'install': {
+      const [which] = rest;
+      const agents = which === 'all' ? [...INSTALLABLE] : which && isInstallable(which) ? [which] : undefined;
+      if (!agents) throw new Error(`say which agent: ${agentList()}, or all`);
+      return console.log(agents.map((a) => install(a)).join('\n'));
+    }
     case 'daemon': {
       if (rest[0] === 'status') {
         const s = await daemonCall('status');

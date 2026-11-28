@@ -1,6 +1,6 @@
 {
   "name": "parley",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Messages between Claude Code sessions on different machines, and between people's: they land in the other conversation by themselves, the way SendMessage does on one machine",
   "author": {
     "name": "akgandlur"

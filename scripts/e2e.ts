@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import type { ServerWebSocket } from 'bun';
 import { addressOf, newIdentity, signText, verifyText, type Identity } from '../src/crypto';
 import { answer, answerMail, canSeal, checkMailOffer, checkOffer, finish, loadPair, newPair, offer, offerMail, open, safetyNumber, savePair, seal, signPrekey } from '../src/ratchet';
 import { MAIL_FRAMES_MAX } from '../src/mail';
+import { machine } from '../src/host';
 import { makeAttestation, readAttestation } from '../src/attest';
 import { readJson, writeJson, type Contact } from '../src/home';
 import { MAX_PER_IP, RELAY_AUTH, startRelay } from '../src/relay';
@@ -90,7 +91,7 @@ async function agent(root: string, session: string, env: Record<string, string> 
   const transport = new StdioClientTransport({
     command: run[0] ?? 'bun',
     args: [...run.slice(1), 'mcp'],
-    env: { ...ENV, PARLEY_HOME: root, PARLEY_RELAY: relayUrl, CLAUDE_CODE_SESSION_ID: session, ...env } as Record<string, string>,
+    env: { ...ENV, PARLEY_HOME: root, PARLEY_RELAY: relayUrl, ...(session ? { CLAUDE_CODE_SESSION_ID: session } : {}), ...env } as Record<string, string>,
     stderr: 'pipe',
   });
   const client = new Client({ name: 'e2e', version: '0' });
@@ -206,7 +207,7 @@ async function messaging() {
   const ann = await agent(A_ROOT, 'session-ann', annSock.env);
   const ben = await agent(B_ROOT, 'session-ben', benSock.env);
   const tools = (await ann.client.listTools()).tools.map((t) => t.name).sort();
-  check('the tools are the six for messages and the five for secrets', JSON.stringify(tools) === JSON.stringify(['cloud_link', 'fetch_with_secret', 'list_agents', 'list_secrets', 'request_secret', 'run_with_secret', 'safety_number', 'send_message', 'send_secret', 'setup', 'to']), tools);
+  check('the tools are the seven for messages and the five for secrets', JSON.stringify(tools) === JSON.stringify(['check_inbox', 'cloud_link', 'fetch_with_secret', 'list_agents', 'list_secrets', 'request_secret', 'run_with_secret', 'safety_number', 'send_message', 'send_secret', 'setup', 'to']), tools);
   const told = ann.client.getInstructions() ?? '';
   check('the instructions describe messaging, with no agenda or rules', told.includes('send_message') && !/agenda|propos|never an instruction|authoris/i.test(told), told);
   const early = await ann.tool('send_message', { to: 'abc-def-ghj', message: 'hi' });
@@ -370,7 +371,7 @@ async function names(p: Pair) {
   console.log('\n# a name for each Claude Code session');
   const other = await agent(A_ROOT, 'session-ann-2');
   const taken = await other.tool('setup', { name: 'ann' });
-  check('a name another open session holds is refused', taken.failed && taken.text.includes('is in use by another Claude Code session'), taken);
+  check('a name another open session holds is refused', taken.failed && taken.text.includes('is in use by another session'), taken);
   const second = await other.tool('setup', { name: 'Ann at home' });
   const secondAddr = addressIn(second.text);
   check('a second name on the machine has its own id', secondAddr && secondAddr !== p.annAddr, second);
@@ -992,6 +993,64 @@ async function daemon(p: Pair) {
   check('`parley daemon stop` ends it', stopped && cli(root, 'daemon', 'status').includes('No parley daemon'), stopped);
 }
 
+async function otherAgents(p: Pair) {
+  console.log('\n# agents other than Claude Code');
+  const home = mkdtempSync(join(base, 'home-'));
+  const setup = (...args: string[]) => {
+    const done = Bun.spawnSync([...RUN, 'install', ...args], { env: { ...ENV, HOME: home, PARLEY_HOME: A_ROOT, PARLEY_RELAY: relayUrl, PARLEY_CLOUD: 'https://cloud.test' } });
+    return { ok: done.exitCode === 0, text: done.stdout.toString() + done.stderr.toString() };
+  };
+  mkdirSync(join(home, '.cursor'), { recursive: true });
+  writeFileSync(join(home, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'x' } } }));
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(join(home, '.codex', 'config.toml'), 'model = "o3"\n\n[mcp_servers.other]\ncommand = "x"\n');
+  const all = setup('all');
+  const read = (...parts: string[]) => JSON.parse(readFileSync(join(home, ...parts), 'utf8'));
+  const cursor = read('.cursor', 'mcp.json');
+  check('`parley install all` writes every agent\'s config and says so', all.ok && ['Codex', 'Cursor', 'Gemini CLI', 'opencode', 'Copilot CLI'].every((a) => all.text.includes(`${a}: parley is in`)), all);
+  check('Cursor gets the server beside what was there', cursor.mcpServers.other.command === 'x' && cursor.mcpServers.parley.args.at(-1) === 'mcp' && cursor.mcpServers.parley.env.PARLEY_AGENT === 'cursor' && cursor.mcpServers.parley.env.PARLEY_RELAY === relayUrl, cursor);
+  const codex = readFileSync(join(home, '.codex', 'config.toml'), 'utf8');
+  check('Codex gets a TOML table beside what was there', codex.startsWith('model = "o3"') && codex.includes('[mcp_servers.other]') && codex.includes('[mcp_servers.parley]') && codex.includes('PARLEY_AGENT = "codex"'), codex);
+  check('Gemini CLI, opencode and Copilot CLI get theirs', read('.gemini', 'settings.json').mcpServers.parley.env.PARLEY_AGENT === 'gemini' && read('.config', 'opencode', 'opencode.json').mcp.parley.command.at(-1) === 'mcp' && read('.copilot', 'mcp-config.json').mcpServers.parley.tools[0] === '*');
+  setup('codex');
+  setup('cursor');
+  check('installing again changes nothing', readFileSync(join(home, '.codex', 'config.toml'), 'utf8') === codex && JSON.stringify(read('.cursor', 'mcp.json')) === JSON.stringify(cursor));
+  writeFileSync(join(home, '.gemini', 'settings.json'), '{');
+  const bad = setup('gemini');
+  check('a config that is not JSON is left alone', !bad.ok && bad.text.includes('not JSON') && readFileSync(join(home, '.gemini', 'settings.json'), 'utf8') === '{', bad);
+
+  const root = join(base, 'machine-codex');
+  const cx = await agent(root, '', { PARLEY_AGENT: 'codex' });
+  const told = cx.client.getInstructions() ?? '';
+  check('a Codex session is told so, and not about SendMessage', told.includes('this Codex session') && told.includes('check_inbox') && !told.includes('SendMessage'), told.slice(0, 200));
+  check('it has the inbox tool', (await cx.client.listTools()).tools.some((t) => t.name === 'check_inbox'));
+  const listed = await cx.tool('list_agents');
+  const name = `Codex on ${machine()}`;
+  check('and takes a name by itself, from the agent and the machine', !listed.failed && listed.text.includes(`This session is "${name}"`) && listed.text.includes('Connected to the relay.'), listed);
+  const addr = addressIn(listed.text);
+  const sent = await p.ann.tool('send_message', { to: addr, message: 'hello codex' });
+  check('a message to it is delivered', !sent.failed && sent.text === `Delivered to "${name}" (${addr}).`, sent);
+  const got = await cx.tool('check_inbox');
+  check('and check_inbox gives it', !got.failed && got.text.includes('parley message from "Ann"') && got.text.includes('hello codex'), got);
+  const empty = await cx.tool('check_inbox');
+  check('once', empty.text === 'Nothing came in.', empty);
+  const waiting = cx.tool('check_inbox', { wait: 20 });
+  setTimeout(() => void p.ann.tool('send_message', { to: addr, message: 'while you wait' }), 500);
+  const waited = await waiting;
+  check('check_inbox with wait returns when a message comes', waited.text.includes('while you wait'), waited);
+  const back = await cx.tool('send_message', { to: 'Ann', message: 'hi from codex' });
+  check('it replies by name', !back.failed && back.text.startsWith('Delivered') && (await until(() => p.annSock.texts().find((t) => t.includes('hi from codex'))))?.includes(`from "${name}"`), back);
+  const cx2 = await agent(root, '', { PARLEY_AGENT: 'codex' });
+  const second = await cx2.tool('list_agents');
+  check('a second session on the machine gets the next name', second.text.includes(`This session is "${name} 2"`), second);
+  await cx2.close();
+  await cx.close();
+  const cx3 = await agent(root, '', { PARLEY_AGENT: 'codex' });
+  const third = await cx3.tool('list_agents');
+  check('a session that restarts is its name again', third.text.includes(`This session is "${name}" (${addr})`), third);
+  await cx3.close();
+}
+
 async function twoRelays() {
   console.log('\n-- two relays behind one address');
   const free = () => {
@@ -1149,6 +1208,7 @@ try {
   const pair = await messaging();
   await mailAtRelay();
   await daemon(pair);
+  await otherAgents(pair);
   await forgery(pair);
   await names(pair);
   await olderContacts(pair);

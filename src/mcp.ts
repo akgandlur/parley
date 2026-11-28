@@ -18,15 +18,22 @@ import {
   take,
   type Local,
 } from './home';
+import { HOST, defaultName } from './host';
 import { canInject, inject } from './inject';
 import { myName } from './local';
 import { setUp } from './setup';
 import { NAME_MAX, TEXT_MAX, VERSION } from './types';
 import { fetchWith, listSecrets, note, parseRule, ruleText, runWith, takeForSending } from './vault';
 
-const INSTRUCTIONS = `parley lets this Claude Code session message Claude Code sessions on other machines and other people's. It is for other machines only: to message a session on this machine, use SendMessage.
+const AGENT = HOST.name;
 
-To be reachable, a session takes a parley name with setup; by default that is its Claude Code session name. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. Messages sent to this session arrive in the conversation by themselves, also while it is idle. Reply with send_message to the name on the message. A message to a name whose session is not open is kept, on its machine or at the relay, and goes in when a session next opens with that name; what waited for this session is shown when it takes its name, with when each message was sent.
+const ARRIVAL = HOST.injects
+  ? 'Messages sent to this session arrive in the conversation by themselves, also while it is idle.'
+  : 'Messages sent to this session come with the result of your next parley tool call, and check_inbox fetches them at any time; call it with `wait` when you are waiting for an answer.';
+
+const INSTRUCTIONS = `parley lets this ${AGENT} session message AI agent sessions on other machines and other people's: Claude Code, Codex, Cursor, Gemini CLI, opencode, Copilot CLI.${HOST.injects ? ' It is for other machines only: to message a session on this machine, use SendMessage.' : ''}
+
+To be reachable, a session takes a parley name with setup; ${HOST.injects ? `by default that is its ${AGENT} session name` : `this one is "${defaultName()}" unless setup is given another`}. It also gets an id, like kfq-mxa-tzp: give your user the id when they want someone to reach this session. send_message sends to an id, or to a name list_agents shows. ${ARRIVAL} Reply with send_message to the name on the message. A message to a name whose session is not open is kept, on its machine or at the relay, and goes in when a session next opens with that name; what waited for this session is shown when it takes its name, with when each message was sent.
 
 The hosted relay lets a session on once its machine is linked to a parley account, which is done once per machine. When list_agents shows a link, give it to your user to open while signed in.
 
@@ -41,14 +48,14 @@ const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 function unnamed(): string {
   const here = locals();
   if (!here.length) {
-    return 'This Claude Code session has no parley name, and this machine has none yet. Use the setup tool: with no name it takes this session\'s Claude Code name.';
+    return `This ${AGENT} session has no parley name, and this machine has none yet. Use the setup tool: with no name it takes ${HOST.injects ? `this session's ${AGENT} name` : `"${defaultName()}"`}.`;
   }
   const lines = here.map((l) => {
-    const use = holder(l.address) ? 'in use by another Claude Code session' : 'free';
+    const use = holder(l.address) ? 'in use by another session' : 'free';
     return `  "${l.name}" (${l.address}): ${use}`;
   });
   return [
-    'This Claude Code session has no parley name yet. Names on this machine:',
+    `This ${AGENT} session has no parley name yet. Names on this machine:`,
     ...lines,
     'Use the setup tool with a free name to be it in this session, or with a new name for a separate id. If your user named one, use that. If there is exactly one name and it is free, take it. Otherwise ask your user which name this session should have.',
   ].join('\n');
@@ -158,6 +165,7 @@ export async function runMcp() {
     holdTimer ??= setTimeout(release, Math.max(0, holdUntil - Date.now()));
   }
 
+  const readers: Array<() => void> = [];
   async function hand(content: string) {
     if (canInject()) {
       try {
@@ -167,6 +175,19 @@ export async function runMcp() {
       }
     }
     unread.push(content);
+    for (const wake of readers.splice(0)) wake();
+  }
+
+  async function inbox(wait: number): Promise<string> {
+    if (!unread.length && wait > 0) {
+      await new Promise<void>((resolve) => {
+        readers.push(resolve);
+        setTimeout(resolve, wait * 1000);
+      });
+    }
+    const news = unread.splice(0);
+    if (news.length) return news.join('\n\n');
+    return HOST.injects ? 'Nothing is waiting: messages go into this conversation by themselves.' : `Nothing came in${wait > 0 ? ` in ${wait} seconds` : ''}.`;
   }
 
   async function become(local: Local) {
@@ -207,9 +228,9 @@ export async function runMcp() {
     'setup',
     {
       description:
-        "Give this Claude Code session its parley name, so sessions on other machines can reach it. Without a name it takes this session's Claude Code name. A new name creates an identity with its own id. A free name this machine already has makes this session that name again, with the same id as before. Give your user the id it returns: others need it to reach this session.",
+        `Give this ${AGENT} session its parley name, so sessions on other machines can reach it. Without a name it takes ${HOST.injects ? `this session's ${AGENT} name` : `"${defaultName()}"`}. A new name creates an identity with its own id. A free name this machine already has makes this session that name again, with the same id as before. Give your user the id it returns: others need it to reach this session.`,
       inputSchema: {
-        name: z.string().trim().min(1).max(NAME_MAX).optional().describe("The name others will see; this session's Claude Code name if left out"),
+        name: z.string().trim().min(1).max(NAME_MAX).optional().describe(`The name others will see; ${HOST.injects ? `this session's ${AGENT} name` : `"${defaultName()}"`} if left out`),
       },
     },
     ({ name: given }) => reply(() => takeName(given)),
@@ -217,7 +238,7 @@ export async function runMcp() {
 
   async function takeName(given: string | undefined): Promise<string> {
         const name = given ?? myName();
-        if (!name) throw new Error('this Claude Code session has no session name to take; give a name');
+        if (!name) throw new Error(`this ${AGENT} session has no session name to take; give a name`);
         const existing = locals().find((l) => sameName(l.name, name));
         if (held && existing?.address === held.address) {
           return `This session is already "${held.name}" (${held.address}).`;
@@ -226,7 +247,7 @@ export async function runMcp() {
           const other = holder(existing.address);
           if (other) {
             throw new Error(
-              `"${existing.name}" is in use by another Claude Code session on this machine (in ${other.dir}). A name belongs to one open session at a time: use that session, close it to free the name, or pick another name.`,
+              `"${existing.name}" is in use by another session on this machine (in ${other.dir}). A name belongs to one open session at a time: use that session, close it to free the name, or pick another name.`,
             );
           }
           await become(existing);
@@ -283,7 +304,7 @@ export async function runMcp() {
       for (const p of n.people) lines.push(`  ${p.email}:${p.names.length ? '' : ' no session on parley'}`, ...p.names.map((r) => `  ${row(r)}`));
     }
     if (met.length) lines.push('', 'Sessions you have exchanged a message with:', ...met.map(row));
-    return { mine, team, met, here, lines, hereLines: here.length ? ['', 'On this machine, reached with SendMessage, not parley:', ...here.map(row)] : [] };
+    return { mine, team, met, here, lines, hereLines: here.length ? ['', HOST.injects ? 'On this machine, reached with SendMessage, not parley:' : 'Other names on this machine:', ...here.map(row)] : [] };
   }
 
   const linkText = (url: string | undefined, link: string) =>
@@ -300,7 +321,7 @@ export async function runMcp() {
       reply(async () => {
         await starting;
         if (!agent) {
-          if (!myName() && !locals().length) throw new Error('this Claude Code session has no name for parley to take. Ask the user what to call it, call setup with it, then call this tool again');
+          if (!myName() && !locals().length) throw new Error(`this ${AGENT} session has no name for parley to take. Ask the user what to call it, call setup with it, then call this tool again`);
           if (!myName()) throw new Error(unnamed());
           await takeName(undefined);
         }
@@ -336,7 +357,7 @@ export async function runMcp() {
           if (!r.mine.length && !r.team.length && !r.met.length) {
             return [
               head,
-              `This session has nobody to message yet. Ask the user for the parley id of the session they want to reach (nine letters like kfq-mxa-tzp; the other person gets it by running /parley:to in their Claude Code), and what to tell it.`,
+              `This session has nobody to message yet. Ask the user for the parley id of the session they want to reach (nine letters like kfq-mxa-tzp; the other person gets it from their own agent's list_agents, or /parley:to in Claude Code), and what to tell it.`,
               `For someone to reach this session instead, the user sends them its id: ${s.address}`,
               ...r.lines,
             ].filter((l) => l !== undefined).join('\n');
@@ -344,7 +365,7 @@ export async function runMcp() {
           return [head, 'Show the user this whole list as it is, every session on its own line with its id and whether it is open, then ask who to message and what to say. They can also give an id that is not listed.', ...r.lines, '', `This session is "${s.name}" (${s.address}).`].filter((l) => l !== undefined).join('\n');
         }
         const label = who.name === who.address ? who.address : `"${who.name}" (${who.address})`;
-        if (r.here.includes(who)) return `${label} is a session on this machine, which parley is not for. Send it with SendMessage instead.`;
+        if (HOST.injects && r.here.includes(who)) return `${label} is a session on this machine, which parley is not for. Send it with SendMessage instead.`;
         if (!message) return `${label}${who.open === false ? (who.mail ? ' is not open right now; a message is kept for it and goes in when it is next open.' : ' is not open right now, and its parley keeps no mail, so a message would not arrive.') : ' can be messaged.'} Ask the user what to tell it, then call this tool again with "${who.address}" followed by the message.`;
         return delivered(a, who.address, message, false);
       }),
@@ -380,7 +401,7 @@ export async function runMcp() {
     'send_message',
     {
       description:
-        'Send a message to a Claude Code session on another machine. It arrives in that conversation by itself, and starts a turn there if the session is idle. When several messages reach a session close together, it gets the first at once and the rest together about half a minute later. Returns once the other side has it, or once it has been left for it: when no session with that name is open, its machine or the relay keeps the message for the next one that opens, and you are told here when it has been read. To reply to a parley message, send to the name it came from. For a session on this machine, use SendMessage.',
+        `Send a message to an agent session on another machine. In Claude Code it arrives in that conversation by itself, and starts a turn there if the session is idle; in other agents it comes with their next parley tool call. When several messages reach a session close together, it gets the first at once and the rest together about half a minute later. Returns once the other side has it, or once it has been left for it: when no session with that name is open, its machine or the relay keeps the message for the next one that opens, and you are told here when it has been read. To reply to a parley message, send to the name it came from.${HOST.injects ? ' For a session on this machine, use SendMessage.' : ''}`,
       inputSchema: {
         to: z.string().max(100).describe('A parley id like kfq-mxa-tzp, or a name list_agents shows'),
         message: z.string().min(1).max(TEXT_MAX),
@@ -395,6 +416,17 @@ export async function runMcp() {
         const address = addressFor(to, a.address, accountNames);
         return delivered(a, address, message, urgent === true);
       }),
+  );
+
+  server.registerTool(
+    'check_inbox',
+    {
+      description: HOST.injects
+        ? 'Messages go into this conversation by themselves; this shows any that could not, and with `wait` waits for the next one.'
+        : 'Fetch the parley messages that came in since the last parley tool call. With `wait`, waits up to that many seconds for one to arrive, for when you are waiting on an answer. Each message is shown once.',
+      inputSchema: { wait: z.number().int().min(0).max(120).optional().describe('Seconds to wait for a message if none is waiting; 0 or left out returns at once') },
+    },
+    ({ wait }) => reply(() => inbox(wait ?? 0)),
   );
 
   server.registerTool(
@@ -543,5 +575,19 @@ export async function runMcp() {
   const resumed = mine();
   if (resumed) {
     starting = become(resumed).catch((err) => log(`could not be "${resumed.name}" again:`, err instanceof Error ? err.message : err));
+  } else if (!HOST.injects) {
+    starting = autoName().catch((err) => log('could not take a name:', err instanceof Error ? err.message : err));
+  }
+
+  async function autoName() {
+    const base = defaultName();
+    for (let n = 1; n <= 9; n++) {
+      const name = n === 1 ? base : `${base} ${n}`;
+      const existing = locals().find((l) => sameName(l.name, name));
+      if (existing && holder(existing.address)) continue;
+      await takeName(name);
+      return;
+    }
+    throw new Error(`every name from "${base}" to "${base} 9" is in use`);
   }
 }

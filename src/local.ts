@@ -1,11 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { HOST, defaultName } from './host';
 
 // ~/.claude/sessions is not a documented API.
 const dir = () => join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'sessions');
 
 export function myName(): string | undefined {
+  if (!HOST.injects) return defaultName();
   const socket = process.env.CLAUDE_CODE_MESSAGING_SOCKET;
   if (!socket) return undefined;
   let files: string[];

@@ -5,6 +5,7 @@ import { connect, createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { startAgent, type Agent, type Incoming } from './agent';
 import { ROOT, holder, locals, readJson, writeJson, type Local } from './home';
+import { selfCommand } from './host';
 import { VERSION } from './types';
 
 const INFO = 'daemon.json';
@@ -79,12 +80,11 @@ export function ensureDaemon(log: (...parts: unknown[]) => void) {
   if (process.env.PARLEY_DAEMON === 'off' || !locals().length) return;
   const info = daemonInfo();
   if (info?.version === VERSION) return;
-  const script = process.argv[1];
-  if (!script) return;
+  const [command, ...args] = selfCommand();
   const { CLAUDE_CODE_SESSION_ID: _s, CLAUDE_CODE_MESSAGING_SOCKET: _m, CLAUDE_CODE_MESSAGING_TOKEN: _t, ...env } = process.env;
   try {
     const out = openSync(join(ROOT, 'daemon.log'), 'a', 0o600);
-    const child = spawn(process.execPath, [script, 'daemon'], { detached: true, stdio: ['ignore', out, out], env });
+    const child = spawn(command as string, [...args, 'daemon'], { detached: true, stdio: ['ignore', out, out], env });
     child.on('error', (err) => log('could not start the parley daemon:', err.message));
     child.unref();
     closeSync(out);

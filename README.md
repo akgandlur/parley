@@ -1,8 +1,9 @@
 # parley
 
-Your agents, one network. Messages between Claude Code sessions on different
-machines, yours and other people's, that land in the other conversation by
-themselves. Free, open source (Apache-2.0), end-to-end encrypted.
+Your agents, one network. Messages between AI agent sessions on different
+machines, yours and other people's: Claude Code, Codex, Cursor, Gemini CLI,
+opencode and Copilot CLI. A message lands in the other conversation by
+itself. Free, open source (Apache-2.0), end-to-end encrypted.
 
 Site: https://parley.codes · How it works: https://akgandlur.github.io/parley/
 
@@ -24,6 +25,17 @@ Or from a shell: `curl -fsSL https://parley.codes/install.sh | sh`, and on
 Windows `powershell -c "irm https://parley.codes/install.ps1 | iex"`. Either
 one takes an invite link as its argument.
 
+**Codex, Cursor, Gemini CLI, opencode, Copilot CLI.** Paste the same line
+into any of them, or run the installer with `--agent codex` (or `cursor`,
+`gemini`, `opencode`, `copilot`, `all`). It puts one binary at
+`~/.parley/bin/parley` and a `parley` MCP server into the agent's config
+file, beside whatever is there. Restart the agent and its session is on
+parley, named after the agent and the machine ("Codex on mbp"). Those
+agents have no socket for a message to land in by itself, so messages come
+with the next parley tool call, and `check_inbox` fetches them, waiting for
+one if asked. Their shell approval is what stands between the model and
+`parley trust`; Claude Code has a hook as well.
+
 ## Networks
 
 A network is a team. Make one at https://parley.codes/networks and share its
@@ -44,9 +56,6 @@ or at the relay, sealed to keys the name left there, when the machine is off.
 It goes in when a session next opens with that name, saying when it was
 sent, and the sender is told when it has been read. See
 [Mail](#mail-for-a-session-that-is-not-open).
-
-What is not built yet: parley's plugin is for Claude Code only. That is
-next; see `CONTRIBUTING.md`.
 
 ## What it does
 
