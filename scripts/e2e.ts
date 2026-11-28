@@ -960,6 +960,42 @@ async function mailAtRelay() {
   samLink.ws.close();
 }
 
+async function mailKeptWhenUnopenable() {
+  console.log('\n# mail a session cannot open is kept, not dropped');
+  const mailDir = join(base, 'kept-mail');
+  const r = startRelay(0, '127.0.0.1', { mailDir });
+  cleanup.push(() => r.stop(true));
+  const at = { PARLEY_RELAY: `ws://127.0.0.1:${r.port}` };
+  const annSock = fakeSession();
+  const gusSock = fakeSession();
+  const annRoot = mkdtempSync(join(base, 'kept-ann-'));
+  const gusRoot = mkdtempSync(join(base, 'kept-gus-'));
+  const ann = await agent(annRoot, 'session-kept-ann', { ...annSock.env, ...at });
+  const annAddr = addressIn((await ann.tool('setup', { name: 'Ann2' })).text);
+  const gus = await agent(gusRoot, 'session-gus', { ...gusSock.env, ...at });
+  const gusAddr = addressIn((await gus.tool('setup', { name: 'Gus' })).text);
+  const gusHome = join(gusRoot, 'ids', gusAddr);
+  await until(() => (existsSync(join(gusHome, 'prekeys.json')) ? true : undefined));
+  await gus.close();
+  const sent = await eventually(async () => {
+    const res = await ann.tool('send_message', { to: gusAddr, message: 'you will never read this' });
+    return res.text.startsWith('Left for') ? res : undefined;
+  });
+  check('the message is left at the relay', sent?.text.includes('at the relay'), sent);
+  const mailFile = join(mailDir, `${gusAddr}.json`);
+  const held = () => (existsSync(mailFile) ? (JSON.parse(readFileSync(mailFile, 'utf8')).frames.length as number) : 0);
+  check('and the relay holds it', await until(() => (held() === 1 ? true : undefined)), held());
+  // Gus loses the one-time key its only copy was sealed to, so it can never open it.
+  rmSync(join(gusHome, 'prekeys.json'), { force: true });
+  const back = await agent(gusRoot, 'session-gus', { ...gusSock.env, ...at });
+  await Bun.sleep(3000);
+  check('a session that cannot open it does not read it', !gusSock.texts().some((t) => t.includes('you will never read this')), gusSock.texts());
+  check('the relay still holds it, rather than dropping it on a took', existsSync(mailFile) && held() === 1, existsSync(mailFile) && held());
+  check('and the sender is not told it arrived', !annSock.texts().some((t) => t.includes('now has the message') || t.includes('has read the message')), annSock.texts());
+  await back.close();
+  await ann.close();
+}
+
 async function daemon(p: Pair) {
   console.log('\n# the machine\'s daemon');
   const root = join(base, 'machine-dan');
@@ -1214,6 +1250,7 @@ try {
   sealing();
   const pair = await messaging();
   await mailAtRelay();
+  await mailKeptWhenUnopenable();
   await daemon(pair);
   await otherAgents(pair);
   await forgery(pair);

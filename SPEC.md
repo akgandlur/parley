@@ -238,8 +238,10 @@ for whom, and when.
 
 After `ready`, the relay sends the id's held frames, oldest first, as `recv`
 with `held: {seq, at}`: `seq` counts up through the mailbox and `at` is when
-the frame arrived. A client answers `took` once it has dealt with a frame,
-and the relay then drops every held frame with that `seq` or a lower one.
+the frame arrived. A client answers `took` once it has dealt with a frame, which for a sealed
+message means it opened it, and the relay then drops every held frame with
+that `seq` or a lower one. A frame it cannot open yet it leaves un-`took`,
+so a later connection, with keys it has since recovered, is sent it again.
 Frames not taken are sent again on the next connection. A frame may
 therefore arrive twice, and a receiver is ready for it: a message `id` it
 has seen is dropped (section 6), and an `hsm` whose `e` it has made a

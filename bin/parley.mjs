@@ -8193,7 +8193,7 @@ ${code}`) }, hkdf, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
 }
 
 // src/types.ts
-var VERSION = "0.13.1";
+var VERSION = "0.13.2";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -8445,10 +8445,16 @@ async function startAgent(home, log, onMessage, onNotice) {
         return;
       }
       const from = String(msg.from);
-      const done = onPeer(from, msg.payload, msg.held !== undefined).catch((err) => log(`could not handle what ${from} sent:`, explain(err)));
+      const done = onPeer(from, msg.payload, msg.held !== undefined).catch((err) => {
+        log(`could not handle what ${from} sent:`, explain(err));
+        return false;
+      });
       if (msg.held && Number.isInteger(msg.held.seq)) {
         const seq = msg.held.seq;
-        done.then(() => socket?.send(JSON.stringify({ t: "took", seq })));
+        done.then((consumed) => {
+          if (consumed)
+            socket?.send(JSON.stringify({ t: "took", seq }));
+        });
       }
     } else if (msg.t === "undeliverable") {
       const ref = String(msg.ref ?? "");
@@ -8576,14 +8582,16 @@ ${box}`) });
     return next;
   }
   async function onPeer(from, p, waited) {
-    if (p?.v !== 3)
-      return otherVersion(from, p);
+    if (p?.v !== 3) {
+      otherVersion(from, p);
+      return true;
+    }
     const conv = convs.get(from);
     if (p.kind === "hs1") {
       if (!knownKey(from, p.key) || !checkOffer(p, address))
-        return;
+        return true;
       if (conv?.offered && address < from)
-        return;
+        return true;
       const made = answer(me, from, p);
       const next = conv?.offered ? conv : newConv();
       if (conv && next !== conv)
@@ -8595,11 +8603,12 @@ ${box}`) });
       relaySend(from, "hs2", { v: 3, kind: "hs2", ...made.reply });
     } else if (p.kind === "hs2") {
       if (!conv?.offered || !knownKey(from, p.key))
-        return;
+        return true;
       try {
         conv.ratchet = finish(conv.offered.hello, conv.offered.pair, address, p);
       } catch (err) {
-        return drop(from, err instanceof Error ? err : new Error(String(err)));
+        drop(from, err instanceof Error ? err : new Error(String(err)));
+        return true;
       }
       conv.key = p.key;
       conv.offered = undefined;
@@ -8609,13 +8618,17 @@ ${box}`) });
         drop(from, new Stale("the other side lost the conversation"));
     } else if (p.kind === "m" || p.kind === "hsm") {
       const c = p.kind === "hsm" ? fromMail(from, p) : conv;
-      if (!c?.ratchet || !c.key)
-        return waited ? undefined : relaySend(from, "reset", { v: 3, kind: "reset" });
+      if (!c?.ratchet || !c.key) {
+        if (!waited)
+          relaySend(from, "reset", { v: 3, kind: "reset" });
+        return false;
+      }
       let inner;
       try {
         inner = JSON.parse(open(c.ratchet, p));
       } catch (err) {
-        return log(`a message from ${from} was dropped:`, explain(err));
+        log(`a message from ${from} was dropped:`, explain(err));
+        return false;
       }
       c.mail = undefined;
       c.resolve();
@@ -8647,7 +8660,7 @@ ${box}`) });
         const id = String(inner.id);
         const l = left.get(id);
         if (l?.to !== from)
-          return;
+          return true;
         left.delete(id);
         onNotice(`parley: "${String(inner.name)}" (${from}) has read the message you left for it at ${new Date(l.at).toISOString()}.`);
       } else if (inner.t === "secret") {
@@ -8667,9 +8680,10 @@ ${box}`) });
         }
         relaySend(from, `ack:${id}`, { v: 3, kind: "m", ...seal(c.ratchet, JSON.stringify({ t: "ack", id, name: me.name, error })) }, true);
       } else if (inner.t === "msg") {
-        await receive(from, c, inner, waited).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
+        await receive(from, c, inner, waited);
       }
     }
+    return true;
   }
   async function receive(from, conv, inner, waited) {
     const key = conv.key;

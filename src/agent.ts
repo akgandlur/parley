@@ -316,10 +316,15 @@ export async function startAgent(
         return;
       }
       const from = String(msg.from);
-      const done = onPeer(from, msg.payload, msg.held !== undefined).catch((err) => log(`could not handle what ${from} sent:`, explain(err)));
+      const done = onPeer(from, msg.payload, msg.held !== undefined).catch((err) => {
+        log(`could not handle what ${from} sent:`, explain(err));
+        return false;
+      });
       if (msg.held && Number.isInteger(msg.held.seq)) {
         const seq = msg.held.seq as number;
-        void done.then(() => socket?.send(JSON.stringify({ t: 'took', seq })));
+        void done.then((consumed) => {
+          if (consumed) socket?.send(JSON.stringify({ t: 'took', seq }));
+        });
       }
     } else if (msg.t === 'undeliverable') {
       const ref = String(msg.ref ?? '');
@@ -428,13 +433,18 @@ export async function startAgent(
     return next;
   }
 
-  async function onPeer(from: string, p: any, waited: boolean): Promise<void> {
-    if (p?.v !== 3) return otherVersion(from, p);
+  // Returns whether a held frame was consumed, so the relay keeps a frame
+  // this process could not open yet for a later connection.
+  async function onPeer(from: string, p: any, waited: boolean): Promise<boolean> {
+    if (p?.v !== 3) {
+      otherVersion(from, p);
+      return true;
+    }
     const conv = convs.get(from);
     if (p.kind === 'hs1') {
-      if (!knownKey(from, p.key) || !checkOffer(p as Hello, address)) return;
+      if (!knownKey(from, p.key) || !checkOffer(p as Hello, address)) return true;
       // Both offered at once: the lower id's handshake wins.
-      if (conv?.offered && address < from) return;
+      if (conv?.offered && address < from) return true;
       const made = answer(me, from, p as Hello);
       const next = conv?.offered ? conv : newConv();
       if (conv && next !== conv) drop(from, new Stale('the other side started the conversation again'));
@@ -444,11 +454,12 @@ export async function startAgent(
       convs.set(from, next);
       relaySend(from, 'hs2', { v: 3, kind: 'hs2', ...made.reply });
     } else if (p.kind === 'hs2') {
-      if (!conv?.offered || !knownKey(from, p.key)) return;
+      if (!conv?.offered || !knownKey(from, p.key)) return true;
       try {
         conv.ratchet = finish(conv.offered.hello, conv.offered.pair, address, p as Hello);
       } catch (err) {
-        return drop(from, err instanceof Error ? err : new Error(String(err)));
+        drop(from, err instanceof Error ? err : new Error(String(err)));
+        return true;
       }
       conv.key = p.key;
       conv.offered = undefined;
@@ -457,13 +468,18 @@ export async function startAgent(
       if (conv) drop(from, new Stale('the other side lost the conversation'));
     } else if (p.kind === 'm' || p.kind === 'hsm') {
       const c = p.kind === 'hsm' ? fromMail(from, p) : conv;
-      // Stale mail from a conversation this process never had is no reason to reset a live one.
-      if (!c?.ratchet || !c.key) return waited ? undefined : relaySend(from, 'reset', { v: 3, kind: 'reset' });
+      if (!c?.ratchet || !c.key) {
+        // Stale mail from a conversation this process never had is kept, not
+        // reset: a live message instead means the conversation is gone.
+        if (!waited) relaySend(from, 'reset', { v: 3, kind: 'reset' });
+        return false;
+      }
       let inner: any;
       try {
         inner = JSON.parse(open(c.ratchet, p));
       } catch (err) {
-        return log(`a message from ${from} was dropped:`, explain(err));
+        log(`a message from ${from} was dropped:`, explain(err));
+        return false;
       }
       c.mail = undefined;
       c.resolve();
@@ -491,7 +507,7 @@ export async function startAgent(
       } else if (inner.t === 'read') {
         const id = String(inner.id);
         const l = left.get(id);
-        if (l?.to !== from) return;
+        if (l?.to !== from) return true;
         left.delete(id);
         onNotice(`parley: "${String(inner.name)}" (${from}) has read the message you left for it at ${new Date(l.at).toISOString()}.`);
       } else if (inner.t === 'secret') {
@@ -511,9 +527,10 @@ export async function startAgent(
         }
         relaySend(from, `ack:${id}`, { v: 3, kind: 'm', ...seal(c.ratchet, JSON.stringify({ t: 'ack', id, name: me.name, error })) }, true);
       } else if (inner.t === 'msg') {
-        await receive(from, c, inner, waited).catch((err) => log(`a message from ${from} was dropped:`, explain(err)));
+        await receive(from, c, inner, waited);
       }
     }
+    return true;
   }
 
   async function receive(from: string, conv: Conv, inner: any, waited: boolean) {
