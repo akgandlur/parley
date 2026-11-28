@@ -209,11 +209,11 @@ sessions, so teammates can be addressed by name before any message.
 
 ## 9. Version notes
 
-A session that receives a payload with `v < 3` and a `key` that hashes to the
-sender's id sends one note the old version can read (kind `msg`, `v: 2`,
-sealed with NaCl-box-style X25519 from the Ed25519 keys), telling it to
-update, at most once in ten minutes per id. A payload with `v > 3` makes the
-receiver tell its user to update.
+A session that receives a payload with `v` other than 3 cannot read it and
+sends nothing the other side could read. It tells its own user that a parley
+of another version tried to reach them and nothing arrived, at most once in
+ten minutes per id. Versions before 0.9 are no longer answered in their own
+format; their user has to update.
 
 ## 10. Safety number
 

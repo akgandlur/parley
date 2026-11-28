@@ -1,0 +1,28 @@
+{
+  "note": "Known-answer vectors for parley. Inputs are fixed; a second implementation must reproduce these exactly. See SPEC.md.",
+  "id": {
+    "publicKey": "p1NPyDR5RCga4dqKmChNGJiynhZ5nOdnrtx6JlW8h4U",
+    "address": "vch-uvs-qfs"
+  },
+  "safetyNumber": {
+    "a": "p1NPyDR5RCga4dqKmChNGJiynhZ5nOdnrtx6JlW8h4U",
+    "b": "3X_buiPzP4A6Qn6nVSqeVzLk8QkvzS3NaSmpqMgIs4A",
+    "number": "00735 22175 93469 12800 01211 42450"
+  },
+  "rootStep": {
+    "root": "0101010101010101010101010101010101010101010101010101010101010101",
+    "dh": "0202020202020202020202020202020202020202020202020202020202020202",
+    "newRoot": "ae7b5d9e328efeb7d6ab66ca171aee631d9c0c7406967625dc1e0fadd2dab1cb",
+    "chainKey": "6d6ad79bdbe7d3c221e4e859b87610b584507ce562be119650db5c1701dbf09b"
+  },
+  "chainStep": {
+    "chainKey": "0303030303030303030303030303030303030303030303030303030303030303",
+    "nextChainKey": "cfbf8f5595e5f186a92161efb3ebb946d3aa706c2df70eed5152741bdb1e7bde",
+    "messageKey": "aa6fa3f949be2b2cc7de5a18e7f65fee5fb78488f588d53196a63e66ad67ad12"
+  },
+  "cipherKeys": {
+    "messageKey": "0404040404040404040404040404040404040404040404040404040404040404",
+    "aesKey": "f66f440e191485013a24988183287e9dd675d319184bc0cba43be8cc84edcfd9",
+    "nonce": "ae71487f27a2dcaf866e3ad5"
+  }
+}

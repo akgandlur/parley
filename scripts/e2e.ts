@@ -7,7 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { ServerWebSocket } from 'bun';
 import { addressOf, newIdentity, signText, verifyText, type Identity } from '../src/crypto';
-import { answer, answerMail, canSeal, checkMailOffer, checkOffer, finish, loadPair, newPair, offer, offerMail, open, safetyNumber, savePair, seal, signPrekey } from '../src/ratchet';
+import { answer, answerMail, canSeal, chainStep, checkMailOffer, checkOffer, cipherKeys, finish, loadPair, newPair, offer, offerMail, open, rootStep, safetyNumber, savePair, seal, signPrekey } from '../src/ratchet';
 import { MAIL_FRAMES_MAX } from '../src/mail';
 import { machine } from '../src/host';
 import { Prekeys } from '../src/prekeys';
@@ -134,6 +134,21 @@ const fails = (fn: () => unknown) => {
     return true;
   }
 };
+
+function vectors() {
+  console.log('\n# known-answer vectors (a second implementation must reproduce these)');
+  const v = JSON.parse(readFileSync(join(import.meta.dir, '..', 'test', 'vectors.json'), 'utf8'));
+  const hex = (b: Buffer) => Buffer.from(b).toString('hex');
+  const fill = (byte: number) => Buffer.alloc(32, byte);
+  check('an id is derived from its key as the vector says', addressOf(v.id.publicKey) === v.id.address, addressOf(v.id.publicKey));
+  check('the safety number matches the vector', safetyNumber(v.safetyNumber.a, v.safetyNumber.b) === v.safetyNumber.number);
+  const [nr, chain] = rootStep(fill(1), fill(2));
+  check('a root step matches the vector', hex(nr) === v.rootStep.newRoot && hex(chain) === v.rootStep.chainKey);
+  const [nc, mk] = chainStep(fill(3));
+  check('a chain step matches the vector', hex(nc) === v.chainStep.nextChainKey && hex(mk) === v.chainStep.messageKey);
+  const ck = cipherKeys(fill(4));
+  check('message-key expansion matches the vector', hex(ck.key) === v.cipherKeys.aesKey && hex(ck.nonce) === v.cipherKeys.nonce);
+}
 
 function sealing() {
   console.log('\n# a conversation is sealed between its two ends');
@@ -459,19 +474,16 @@ async function olderVersion() {
   const started = Date.now();
   const sent = await nina.tool('send_message', { to: oliveAddr, message: 'hello from 0.9' });
   check('sending to it fails at once and says it is on an older parley', sent.failed && sent.text.includes('older than 0.9') && Date.now() - started < 5000, { sent, ms: Date.now() - started });
-  const note = await until(() => oldSock.texts().find((t) => t.includes('automatic note from parley')));
-  check('it gets a note it can read, with how to update', note?.includes('"Nina"') && note.includes('claude plugin update parley@parley') && note.includes(VERSION), oldSock.texts());
+  check('nothing readable is sent back to the old client', !(await until(() => oldSock.texts().find((t) => t.includes('automatic note from parley')), 2000)), oldSock.texts());
   check('the sender is not told a second time by a notice', !newSock.texts().some((t) => t.includes('tried to reach')), newSock.texts());
 
   const back = await olive.tool('send_message', { to: ottoAddr, message: 'hello from 0.8' });
   check('its own message does not get through', back.failed, back);
   const notice = await until(() => otherSock.texts().find((t) => t.includes('tried to reach this session')));
   check('the session it tried is told who tried and why nothing arrived', notice?.includes(oliveAddr) && notice.includes('older than 0.9'), otherSock.texts());
-  const second = await until(() => (oldSock.texts().filter((t) => t.includes('automatic note from parley')).length === 2 ? true : undefined));
-  check('and it gets the note from that session too', second, oldSock.texts());
   await olive.tool('send_message', { to: ottoAddr, message: 'again' });
   await new Promise((r) => setTimeout(r, 500));
-  check('a second try within ten minutes repeats neither', otherSock.texts().filter((t) => t.includes('tried to reach')).length === 1 && oldSock.texts().filter((t) => t.includes('automatic note')).length === 2, { other: otherSock.texts(), old: oldSock.texts() });
+  check('a second try within ten minutes does not repeat the notice', otherSock.texts().filter((t) => t.includes('tried to reach')).length === 1, otherSock.texts());
   const fine = await nina.tool('send_message', { to: ottoAddr, message: 'between two on this version' });
   check('two sessions on this version still talk, with no notice', !fine.failed && !newSock.texts().concat(otherSock.texts()).some((t) => t.includes('newer parley')), fine);
   for (const a of [olive, nina, otto]) await a.close();
@@ -1247,6 +1259,7 @@ async function sessionsHere() {
 
 try {
   console.log(`parley ${VERSION} on ${RUN[0]}`);
+  vectors();
   sealing();
   const pair = await messaging();
   await mailAtRelay();

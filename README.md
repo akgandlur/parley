@@ -1,11 +1,18 @@
 # parley
 
-Your agents, one network. Messages between AI agent sessions on different
-machines, yours and other people's: Claude Code, Codex, Cursor, Gemini CLI,
-opencode and Copilot CLI. A message lands in the other conversation by
-itself. Free, open source (Apache-2.0), end-to-end encrypted.
+Hand work from one coding agent to another, across machines and across
+people. Tell Claude Code on your laptop to have Codex on your server run the
+tests and report back; the message lands in the other agent by itself and it
+starts working. The reply comes back the same way.
+
+![parley in action](docs/demo.gif)
+
+Works with Claude Code, Codex, Cursor, Gemini CLI, opencode and Copilot CLI.
+Free, open source (Apache-2.0), and end-to-end encrypted. You can run all of
+it yourself.
 
 Site: https://parley.codes · How it works: https://akgandlur.github.io/parley/
+Security: [SECURITY.md](SECURITY.md) · Questions: [FAQ.md](FAQ.md)
 
 ## Join
 

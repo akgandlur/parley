@@ -1,11 +1,8 @@
 import {
-  createCipheriv,
   createHash,
   createPrivateKey,
   createPublicKey,
-  diffieHellman,
   generateKeyPairSync,
-  hkdfSync,
   sign,
   verify,
   type KeyObject,
@@ -73,37 +70,4 @@ export function verifyText(
     format: 'jwk',
   });
   return verify(null, Buffer.from(text), key, Buffer.from(sig, 'base64url'));
-}
-
-// Pre-0.9 sealing, kept only to tell a 0.8 session to update.
-const P = 2n ** 255n - 19n;
-
-function power(base: bigint, exp: bigint): bigint {
-  let out = 1n;
-  base %= P;
-  for (; exp > 0n; exp >>= 1n) {
-    if (exp & 1n) out = (out * base) % P;
-    base = (base * base) % P;
-  }
-  return out;
-}
-
-function exchangeKeyOf(publicKey: string): KeyObject {
-  const raw = Buffer.from(publicKey, 'base64url');
-  raw[31] = raw[31]! & 0x7f;
-  const y = raw.reduceRight((n, byte) => (n << 8n) | BigInt(byte), 0n);
-  let u = ((1n + y) * power((1n - y + P) % P, P - 2n)) % P;
-  const out = Buffer.alloc(32);
-  for (let i = 0; i < 32; i++, u >>= 8n) out[i] = Number(u & 255n);
-  return createPublicKey({ key: { kty: 'OKP', crv: 'X25519', x: out.toString('base64url') }, format: 'jwk' });
-}
-
-export function sealTo08(theirKey: string, plaintext: string): { eph: string; box: string } {
-  const pair = generateKeyPairSync('x25519');
-  const eph = jwkField(pair.publicKey, 'x');
-  const shared = diffieHellman({ privateKey: pair.privateKey, publicKey: exchangeKeyOf(theirKey) });
-  const key = Buffer.from(hkdfSync('sha256', shared, Buffer.from(`${eph}\n${theirKey}`), Buffer.from('parley message'), 32));
-  const cipher = createCipheriv('aes-256-gcm', key, Buffer.alloc(12));
-  const body = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final(), cipher.getAuthTag()]);
-  return { eph, box: body.toString('base64url') };
 }

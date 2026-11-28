@@ -4,7 +4,7 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import { startAccount, type AccountState, type Verified } from './account';
 import { readAttestation } from './attest';
-import { addressOf, sealTo08, signText } from './crypto';
+import { addressOf, signText } from './crypto';
 import { isSavedKey, loadConfig, loadContacts, loadIdentity, readJson, saveContact } from './home';
 import { OPKS_LOW } from './mail';
 import { OPKS_STOCK, Prekeys } from './prekeys';
@@ -398,19 +398,15 @@ export async function startAgent(
     if (!Number.isInteger(p?.v) || p.speaks === 3) return;
     if (p.v < 3 && (typeof p.key !== 'string' || addressOf(p.key) !== from)) return;
     const asked = convs.get(from)?.offered !== undefined;
-    if (asked && p.v < 3) drop(from, new Error(`${from} is on a parley older than 0.9, which this one cannot talk with. It has been sent a note saying it has to update`));
+    if (asked && p.v < 3) drop(from, new Error(`${from} is on a parley older than 0.9, which this one cannot talk with. It cannot be reached until its user updates it`));
     if (Date.now() - (told.get(from) ?? 0) < TOLD_AGAIN_MS) return;
     told.set(from, Date.now());
     if (p.v > 3) {
       return onNotice(`parley: ${from} tried to reach this session from a newer parley than this one (${VERSION}), and the two cannot talk. ${HOW_TO_UPDATE}`);
     }
     if (!asked) {
-      onNotice(`parley: ${from} tried to reach this session, but it is on a parley older than 0.9, which this one cannot talk with. Nothing it sent arrived. It has been sent a note saying it has to update.`);
+      onNotice(`parley: ${from} tried to reach this session on a parley older than 0.9, which this one cannot talk with, so nothing it sent arrived. Its user has to update it; it cannot be told from here.`);
     }
-    const id = randomBytes(9).toString('base64url');
-    const text = `This is an automatic note from parley, not from the session itself. This session is on parley ${VERSION}, and yours is older than 0.9: the two cannot talk, so nothing you send here arrives. ${HOW_TO_UPDATE} From 0.9 on, each machine is linked once to a parley account.`;
-    const { eph, box } = sealTo08(p.key, JSON.stringify({ id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
-    relaySend(from, `note:${id}`, { v: 2, kind: 'msg', key: me.publicKey, eph, box, sig: signText(me, `parley message\n${from}\n${eph}\n${box}`) });
   }
 
   function fromMail(from: string, p: MailHello & { h: unknown; c: string }): Conv | undefined {

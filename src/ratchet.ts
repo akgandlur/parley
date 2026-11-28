@@ -44,12 +44,12 @@ const dh = (mine: KeyObject, theirs: string) =>
 
 const hkdf = (ikm: Buffer, salt: Buffer, info: string, bytes: number) => Buffer.from(hkdfSync('sha256', ikm, salt, Buffer.from(info), bytes));
 
-function rootStep(root: Buffer, shared: Buffer): [Buffer, Buffer] {
+export function rootStep(root: Buffer, shared: Buffer): [Buffer, Buffer] {
   const out = hkdf(shared, root, 'parley ratchet root', 64);
   return [out.subarray(0, 32), out.subarray(32)];
 }
 
-function chainStep(chain: Buffer): [Buffer, Buffer] {
+export function chainStep(chain: Buffer): [Buffer, Buffer] {
   const mac = (byte: number) => createHmac('sha256', chain).update(Buffer.from([byte])).digest();
   return [mac(2), mac(1)];
 }
@@ -137,7 +137,7 @@ export function answerMail(me: Identity, hello: MailHello, spk: Pair, opk: Pair 
 
 const headerBytes = (h: Header) => Buffer.from(`${h.dh}\n${h.pn}\n${h.n}`);
 
-function cipherKeys(messageKey: Buffer) {
+export function cipherKeys(messageKey: Buffer) {
   const out = hkdf(messageKey, Buffer.alloc(32), 'parley message key', 44);
   return { key: out.subarray(0, 32), nonce: out.subarray(32) };
 }

@@ -6982,13 +6982,10 @@ import { join as join16 } from "path";
 
 // src/crypto.ts
 import {
-  createCipheriv,
   createHash,
   createPrivateKey,
   createPublicKey,
-  diffieHellman,
   generateKeyPairSync,
-  hkdfSync,
   sign,
   verify
 } from "node:crypto";
@@ -7038,37 +7035,6 @@ function verifyText(publicKey, text, sig) {
     format: "jwk"
   });
   return verify(null, Buffer.from(text), key, Buffer.from(sig, "base64url"));
-}
-var P = 2n ** 255n - 19n;
-function power(base, exp) {
-  let out = 1n;
-  base %= P;
-  for (;exp > 0n; exp >>= 1n) {
-    if (exp & 1n)
-      out = out * base % P;
-    base = base * base % P;
-  }
-  return out;
-}
-function exchangeKeyOf(publicKey) {
-  const raw = Buffer.from(publicKey, "base64url");
-  raw[31] = raw[31] & 127;
-  const y = raw.reduceRight((n, byte) => n << 8n | BigInt(byte), 0n);
-  let u = (1n + y) * power((1n - y + P) % P, P - 2n) % P;
-  const out = Buffer.alloc(32);
-  for (let i = 0;i < 32; i++, u >>= 8n)
-    out[i] = Number(u & 255n);
-  return createPublicKey({ key: { kty: "OKP", crv: "X25519", x: out.toString("base64url") }, format: "jwk" });
-}
-function sealTo08(theirKey, plaintext) {
-  const pair = generateKeyPairSync("x25519");
-  const eph = jwkField(pair.publicKey, "x");
-  const shared = diffieHellman({ privateKey: pair.privateKey, publicKey: exchangeKeyOf(theirKey) });
-  const key = Buffer.from(hkdfSync("sha256", shared, Buffer.from(`${eph}
-${theirKey}`), Buffer.from("parley message"), 32));
-  const cipher = createCipheriv("aes-256-gcm", key, Buffer.alloc(12));
-  const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
-  return { eph, box: body.toString("base64url") };
 }
 
 // src/attest.ts
@@ -7278,7 +7244,6 @@ function normalizeAddress2(input) {
   }
   return input.trim().toLowerCase();
 }
-var P2 = 2n ** 255n - 19n;
 
 // src/daemon.ts
 import { createHash as createHash5 } from "node:crypto";
@@ -7504,15 +7469,15 @@ import { join as join3 } from "node:path";
 
 // src/ratchet.ts
 import {
-  createCipheriv as createCipheriv2,
+  createCipheriv,
   createDecipheriv,
   createHash as createHash3,
   createHmac,
   createPrivateKey as createPrivateKey2,
   createPublicKey as createPublicKey2,
-  diffieHellman as diffieHellman2,
+  diffieHellman,
   generateKeyPairSync as generateKeyPairSync2,
-  hkdfSync as hkdfSync2
+  hkdfSync
 } from "node:crypto";
 var MAX_SKIP = 200;
 var TAG = 16;
@@ -7529,11 +7494,11 @@ var signPrekey = (me, pub) => signText(me, `parley prekey
 ${pub}`);
 var checkPrekey = (key, pub, sig) => verifyText(key, `parley prekey
 ${pub}`, sig);
-var dh = (mine, theirs) => diffieHellman2({
+var dh = (mine, theirs) => diffieHellman({
   privateKey: mine,
   publicKey: createPublicKey2({ key: { kty: "OKP", crv: "X25519", x: theirs }, format: "jwk" })
 });
-var hkdf = (ikm, salt, info, bytes) => Buffer.from(hkdfSync2("sha256", ikm, salt, Buffer.from(info), bytes));
+var hkdf = (ikm, salt, info, bytes) => Buffer.from(hkdfSync("sha256", ikm, salt, Buffer.from(info), bytes));
 function rootStep(root, shared) {
   const out = hkdf(shared, root, "parley ratchet root", 64);
   return [out.subarray(0, 32), out.subarray(32)];
@@ -7624,7 +7589,7 @@ function seal(r, plaintext) {
   r.sending = chain;
   const h = { dh: r.mine.publicKey, pn: r.pn, n: r.ns++ };
   const { key, nonce } = cipherKeys(messageKey);
-  const cipher = createCipheriv2("aes-256-gcm", key, nonce);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
   cipher.setAAD(Buffer.concat([r.ad, headerBytes(h)]));
   const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
   return { h, c: body.toString("base64url") };
@@ -7921,7 +7886,7 @@ import { join as join6 } from "node:path";
 
 // src/vault.ts
 import { spawn } from "node:child_process";
-import { createCipheriv as createCipheriv3, createDecipheriv as createDecipheriv2, randomBytes } from "node:crypto";
+import { createCipheriv as createCipheriv2, createDecipheriv as createDecipheriv2, randomBytes } from "node:crypto";
 import { appendFileSync, chmodSync as chmodSync3, existsSync as existsSync5, mkdirSync as mkdirSync3, readFileSync as readFileSync3 } from "node:fs";
 import { basename, join as join5 } from "node:path";
 var DIR = join5(ROOT, "vault");
@@ -7968,7 +7933,7 @@ function putSecret(label, value, from, use) {
   if (had && had.from !== from)
     throw new Error(`this machine already keeps a secret labelled ${label}, from ${had.from}. Its person removes it first with /parley:secret remove ${label}, or another label is used`);
   const iv = randomBytes(12);
-  const cipher = createCipheriv3("aes-256-gcm", key(), iv);
+  const cipher = createCipheriv2("aes-256-gcm", key(), iv);
   const ct = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
   entries[label] = { iv: iv.toString("base64"), ct: ct.toString("base64"), tag: cipher.getAuthTag().toString("base64"), from, at: new Date().toISOString(), sendTo: had?.sendTo ?? [], use: had ? had.use : use };
   save(entries);
@@ -8193,7 +8158,7 @@ ${code}`) }, hkdf, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
 }
 
 // src/types.ts
-var VERSION = "0.13.3";
+var VERSION = "0.14.0";
 var NAME_MAX = 60;
 var TEXT_MAX = 150000;
 
@@ -8540,7 +8505,7 @@ async function startAgent(home, log, onMessage, onNotice) {
       return;
     const asked = convs.get(from)?.offered !== undefined;
     if (asked && p.v < 3)
-      drop(from, new Error(`${from} is on a parley older than 0.9, which this one cannot talk with. It has been sent a note saying it has to update`));
+      drop(from, new Error(`${from} is on a parley older than 0.9, which this one cannot talk with. It cannot be reached until its user updates it`));
     if (Date.now() - (told.get(from) ?? 0) < TOLD_AGAIN_MS)
       return;
     told.set(from, Date.now());
@@ -8548,15 +8513,8 @@ async function startAgent(home, log, onMessage, onNotice) {
       return onNotice(`parley: ${from} tried to reach this session from a newer parley than this one (${VERSION}), and the two cannot talk. ${HOW_TO_UPDATE}`);
     }
     if (!asked) {
-      onNotice(`parley: ${from} tried to reach this session, but it is on a parley older than 0.9, which this one cannot talk with. Nothing it sent arrived. It has been sent a note saying it has to update.`);
+      onNotice(`parley: ${from} tried to reach this session on a parley older than 0.9, which this one cannot talk with, so nothing it sent arrived. Its user has to update it; it cannot be told from here.`);
     }
-    const id = randomBytes2(9).toString("base64url");
-    const text = `This is an automatic note from parley, not from the session itself. This session is on parley ${VERSION}, and yours is older than 0.9: the two cannot talk, so nothing you send here arrives. ${HOW_TO_UPDATE} From 0.9 on, each machine is linked once to a parley account.`;
-    const { eph, box } = sealTo08(p.key, JSON.stringify({ id, name: me.name, text, at: new Date().toISOString(), att: account.att() }));
-    relaySend(from, `note:${id}`, { v: 2, kind: "msg", key: me.publicKey, eph, box, sig: signText(me, `parley message
-${from}
-${eph}
-${box}`) });
   }
   function fromMail(from, p) {
     const conv = convs.get(from);
