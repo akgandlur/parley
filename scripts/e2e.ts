@@ -997,7 +997,8 @@ async function otherAgents(p: Pair) {
   console.log('\n# agents other than Claude Code');
   const home = mkdtempSync(join(base, 'home-'));
   const setup = (...args: string[]) => {
-    const done = Bun.spawnSync([...RUN, 'install', ...args], { env: { ...ENV, HOME: home, PARLEY_HOME: A_ROOT, PARLEY_RELAY: relayUrl, PARLEY_CLOUD: 'https://cloud.test' } });
+    const { XDG_CONFIG_HOME: _x, CODEX_HOME: _c, ...clean } = ENV as Record<string, string | undefined>;
+    const done = Bun.spawnSync([...RUN, 'install', ...args], { env: { ...clean, HOME: home, PARLEY_HOME: A_ROOT, PARLEY_RELAY: relayUrl, PARLEY_CLOUD: 'https://cloud.test' } });
     return { ok: done.exitCode === 0, text: done.stdout.toString() + done.stderr.toString() };
   };
   mkdirSync(join(home, '.cursor'), { recursive: true });
